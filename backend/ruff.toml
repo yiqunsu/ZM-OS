@@ -1,0 +1,11 @@
+target-version = "py311"
+line-length = 110
+extend-exclude = ["alembic/versions"]
+
+[lint]
+select = ["E", "F", "I"]
+
+[lint.per-file-ignores]
+# SQLAlchemy 2.0 Mapped[] relationships forward-reference sibling model classes as strings
+# (resolved at mapper-configuration time) without importing them, to avoid circular imports.
+"app/models/*.py" = ["F821"]
