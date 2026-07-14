@@ -1,3 +1,4 @@
+from app.models.audit import AgentAuditLog
 from app.models.base import Base
 from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
@@ -26,4 +27,5 @@ __all__ = [
     "ChatMessage",
     "User",
     "UserRole",
+    "AgentAuditLog",
 ]

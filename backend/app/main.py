@@ -1,11 +1,15 @@
+from contextlib import asynccontextmanager
+
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.graph import close_agent, init_agent
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
 from app.core.request_logging import RequestLoggingMiddleware
 from app.routers import (
+    agent,
     auth,
     customers,
     formulas,
@@ -26,7 +30,20 @@ if settings.SENTRY_DSN:
 else:
     logger.info("sentry_disabled", reason="SENTRY_DSN not set")
 
-app = FastAPI(title="FilmOS Backend")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Bring up the LangGraph agent (checkpointer pool + compiled graph).
+    try:
+        await init_agent()
+        logger.info("agent_initialized")
+    except Exception as err:  # noqa: BLE001
+        logger.error("agent_init_failed", error=str(err))
+    yield
+    await close_agent()
+
+
+app = FastAPI(title="FilmOS Backend", lifespan=lifespan)
 
 app.add_middleware(RequestLoggingMiddleware)
 
@@ -56,5 +73,6 @@ for router in (
     orders.router,
     production_tasks.router,
     kanban.router,
+    agent.router,
 ):
     app.include_router(router, prefix="/api")

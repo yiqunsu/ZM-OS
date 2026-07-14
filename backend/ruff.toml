@@ -9,3 +9,7 @@ select = ["E", "F", "I"]
 # SQLAlchemy 2.0 Mapped[] relationships forward-reference sibling model classes as strings
 # (resolved at mapper-configuration time) without importing them, to avoid circular imports.
 "app/models/*.py" = ["F821"]
+# The LLM tool-call schemas embed long Chinese description strings verbatim (tuned against
+# DeepSeek); wrapping them would hurt readability more than the long lines do.
+"app/agent/tools.py" = ["E501"]
+"app/agent/prompts.py" = ["E501"]
