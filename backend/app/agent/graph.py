@@ -49,32 +49,41 @@ async def _agent_node(state: AgentState) -> dict[str, Any]:
     context = await skills.load_context(skill)
     system = prompts.system_prompt() + "\n\n" + skill.task_prompt + context
 
-    model = _build_model().bind_tools(schemas_for(skill.allowed_tools))
+    # parallel_tool_calls=False asks the model for one call per turn, but DeepSeek
+    # ignores it and still emits parallel calls — so the real guard is _tools_node,
+    # which answers *every* tool_call. We keep the hint for providers that honor it.
+    model = _build_model().bind_tools(schemas_for(skill.allowed_tools), parallel_tool_calls=False)
     response = await model.ainvoke([SystemMessage(content=system), *state["messages"]])
     return {"messages": [response]}
 
 
 async def _tools_node(state: AgentState) -> dict[str, Any]:
+    # Answer EVERY tool_call on the message: DeepSeek emits parallel calls, and the
+    # OpenAI protocol requires one tool message per tool_call_id — leaving any
+    # unanswered makes the next model turn fail with "insufficient tool messages".
     last = state["messages"][-1]
-    tool_call = last.tool_calls[0]  # handle one tool call per turn (matches original design)
-    name = tool_call["name"]
-    args = tool_call["args"]
-    tc_id = tool_call["id"]
+    out: list[ToolMessage] = []
+    for tool_call in last.tool_calls:
+        name = tool_call["name"]
+        args = tool_call["args"]
+        tc_id = tool_call["id"]
 
-    if name in WRITE_TOOLS:
-        # `interrupt()` is the first side-effecting call, so the pre-interrupt work
-        # (enrich, which is read-only/idempotent) re-running on resume is harmless.
-        display = await enrich_for_display(name, args)
-        decision = interrupt({"tool_name": name, "args": args, "display": display})
-        if decision == "confirm":
-            result = await run_write_tool(name, args)
+        if name in WRITE_TOOLS:
+            # `interrupt()` is the first side-effecting call. On resume the node
+            # re-runs from the top, so read calls above and enrich (read-only/
+            # idempotent) re-running is harmless.
+            display = await enrich_for_display(name, args)
+            decision = interrupt({"tool_name": name, "args": args, "display": display})
+            if decision == "confirm":
+                result = await run_write_tool(name, args)
+            else:
+                result = {"cancelled": True, "message": "老板取消了操作"}
         else:
-            result = {"cancelled": True, "message": "老板取消了操作"}
-    else:
-        result = await run_read_tool(name, args)
+            result = await run_read_tool(name, args)
 
-    content = json.dumps(result, ensure_ascii=False, default=str)
-    return {"messages": [ToolMessage(content=content, tool_call_id=tc_id, name=name)]}
+        content = json.dumps(result, ensure_ascii=False, default=str)
+        out.append(ToolMessage(content=content, tool_call_id=tc_id, name=name))
+    return {"messages": out}
 
 
 def _route_after_agent(state: AgentState) -> str:
