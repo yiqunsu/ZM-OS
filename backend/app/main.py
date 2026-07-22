@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.graph import close_agent, init_agent
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
+from app.core.phoenix import setup_phoenix
 from app.core.request_logging import RequestLoggingMiddleware
 from app.routers import (
     agent,
@@ -29,6 +30,10 @@ if settings.SENTRY_DSN:
     logger.info("sentry_enabled", environment=settings.ENVIRONMENT)
 else:
     logger.info("sentry_disabled", reason="SENTRY_DSN not set")
+
+# LangChain/LangGraph OpenInference instrumentation → Phoenix collector.
+# No-op unless PHOENIX_ENABLED; must run before the agent graph is exercised.
+setup_phoenix()
 
 
 @asynccontextmanager

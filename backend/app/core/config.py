@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
+    # ─── Phoenix (Arize) observability ─────────────────────────────────────────
+    # Gated like SENTRY_DSN: when disabled the app behaves identically and never
+    # talks to the collector. Traces are shipped over OTLP/HTTP to the Phoenix
+    # container (see docker-compose `phoenix` service).
+    PHOENIX_ENABLED: bool = False
+    PHOENIX_COLLECTOR_ENDPOINT: str = "http://phoenix:6006"
+    PHOENIX_PROJECT_NAME: str = "filmos-agent"
+
     model_config = SettingsConfigDict(env_file=".env")
 
     @property

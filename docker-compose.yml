@@ -15,6 +15,18 @@ services:
     ports:
       - "6379:6379"
 
+  # Arize Phoenix: OpenTelemetry trace collector + UI for the LangGraph agent.
+  # Decoupled sink — the backend just ships traces here; if it's down the API
+  # is unaffected. Storage stays in its own volume, isolated from the business DB.
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"    # UI + OTLP/HTTP (/v1/traces)
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenixdata:/mnt/data
+
   backend:
     build: ./backend
     ports:
@@ -23,9 +35,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://filmos:filmos@postgres:5432/filmos
       REDIS_URL: redis://redis:6379
+      PHOENIX_ENABLED: "true"
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
     depends_on:
       - postgres
       - redis
+      - phoenix
 
   frontend:
     build: ./frontend
@@ -37,3 +52,4 @@ services:
 
 volumes:
   pgdata:
+  phoenixdata:
