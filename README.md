@@ -8,39 +8,45 @@
 
 ## 整体架构
 
-前后端分离，单仓库（monorepo）管理两个独立可部署单元：
+前后端分离，单仓库（monorepo）管理多个独立容器：
 
 ``` mermaid
 flowchart LR
     subgraph FE["前端 frontend (Next.js)"]
         UI["浏览器 UI<br/>看板/订单/对话"]
-        NA["NextAuth<br/>登录 + 签发 JWT"]
+        NA["Auth.js<br/>OIDC 会话 + Token 刷新"]
     end
     subgraph BE["后端 backend (FastAPI) — 唯一业务入口"]
         MW["JWT 中间件"]
         R["Router 层"]
         S["Service 层"]
-        AG["LangGraph Agent"]
+        AR["Agent runtime adapter"]
     end
-    PG[("PostgreSQL<br/>业务/审计/图状态")]
-    RD[("Redis<br/>缓存/会话")]
-    PX["Phoenix<br/>Agent Trace UI"]
+    OC["OpenClaw<br/>私有 Agent 容器"]
+    CD["Casdoor<br/>OIDC + 用户角色"]
+    PG[("PostgreSQL<br/>业务/聊天历史/审计")]
+    QW["千问<br/>OpenAI-compatible API"]
+    LG["LangGraph<br/>临时回退运行时"]
+    PX["Phoenix<br/>可选 Trace UI"]
 
     UI -->|"REST + Bearer JWT"| MW
     UI -->|"SSE 流式对话"| MW
-    NA -.->|签发 backendToken| UI
+    UI -->|OIDC 跳转| CD
+    CD -->|RS256 access token| NA --> UI
     MW --> R --> S --> PG
-    R --> AG --> PG
-    S --> RD
-    AG -.->|"OpenInference / OTLP"| PX
+    R --> AR -->|"私有网络 + Token"| OC --> QW
+    AR -.->|"AGENT_RUNTIME=langgraph"| LG --> PG
+    LG -.->|"OpenInference / OTLP"| PX
 ```
 
 关键点：
 
 - **前端只做 UI**：不直连数据库，所有数据都经 FastAPI。这是把「前后端分离」落到实处的架构，也是大厂最常见的分工。
-- **后端是唯一业务入口**：REST API + AI Agent（LangGraph 编排的对话式录单/排产），SSE 流式返回。
-- **前后端通过标准 JWT 解耦**：前端用 NextAuth 登录并签发 JWT，后端中间件校验，双方不共享 session 存储，可独立部署/扩容。
-- **PostgreSQL** 存业务数据、审计日志，以及 LangGraph Agent 的图状态（checkpointer）；**Redis** 用于缓存与会话。
+- **后端是唯一业务入口**：REST API + Agent 适配层，统一完成鉴权、用户会话隔离、PostgreSQL 历史持久化和 SSE 流式返回。
+- **Casdoor 负责生产登录**：Auth.js 完成 OIDC code flow 和 Token 刷新，FastAPI 通过 JWKS 验证短期 RS256 access token，并把身份映射到稳定的本地用户 ID。
+- **FastAPI 负责授权**：`OWNER` 与 `OPERATOR` 都可管理订单、生产任务和自己的 Agent 会话；只有 `OWNER` 可修改基础数据。
+- **OpenClaw** 是当前首选 Agent 运行时，单独容器化且不直连业务数据库；第一版只支持文本对话。LangGraph 暂时保留为回退路径，其业务工具尚未迁移到 OpenClaw。
+- **PostgreSQL** 存业务数据、聊天历史和审计日志；Redis 目前不是核心依赖，只在本地 Compose 保留。
 - **Phoenix** 通过 OpenInference/OpenTelemetry 接收 Agent Trace，用于查看模型、图节点和工具调用；它是可关闭的观测旁路，不参与业务事务。
 
 ---
@@ -53,8 +59,11 @@ flowchart LR
 .
 ├── frontend/            # Next.js 前端（UI 层）——详见 frontend/README.md
 ├── backend/             # FastAPI 后端（业务 + AI Agent）——详见 backend/README.md
+├── openclaw/            # OpenClaw 配置、只读 workspace 与连通性测试
+├── deploy/production/   # 腾讯云单机 Compose、发布与备份脚本
 ├── docker-compose.yml   # 本地/staging 编排：frontend + backend + postgres + redis + phoenix
 ├── meta/                # Ground Truth、工程规范、测试要求和架构决策
+├── .trellis/            # Agent 任务、分层 spec、会话记忆与工作流
 └── .github/workflows/   # CI：backend-ci（lint+test+build）、frontend-ci（lint+typecheck+build）
 ```
 
@@ -62,6 +71,7 @@ flowchart LR
 
 - 前端细节 → [frontend/README.md](frontend/README.md)
 - 后端细节 → [backend/README.md](backend/README.md)
+- 项目规范与 Trellis 约定 → [meta/README.md](meta/README.md)
 
 ---
 
@@ -72,11 +82,12 @@ flowchart LR
 
 | 层        | 技术                                                              |
 | -------- | --------------------------------------------------------------- |
-| 前端       | Next.js (App Router) · React · TypeScript · Tailwind · NextAuth |
+| 前端       | Next.js (App Router) · React · TypeScript · Tailwind · Auth.js |
 | 后端       | FastAPI · SQLAlchemy 2.0 (async) · Alembic · Pydantic           |
-| AI Agent | LangGraph · DeepSeek（OpenAI 兼容 API，经 langchain-openai）          |
+| AI Agent | OpenClaw · LangGraph（回退）· OpenAI-compatible API（默认千问）        |
 | Agent 可观测性 | OpenInference · OpenTelemetry · Arize Phoenix |
-| 数据库      | PostgreSQL · Redis                                              |
+| 身份       | Casdoor · OIDC · RS256/JWKS                                    |
+| 数据库      | PostgreSQL · Redis（仅本地可选）                                  |
 | 部署       | Docker Compose                                                  |
 | CI       | GitHub Actions                                                  |
 
@@ -96,7 +107,7 @@ docker compose up -d --build
 # 2. 建表（首次或有新迁移时）
 docker compose exec backend alembic upgrade head
 
-# 3. 创建登录账号
+# 3. 创建本地开发账号（生产环境改用 Casdoor）
 docker compose exec backend python scripts/seed_admin.py owner@filmos.local filmos123
 
 # 4.（可选）灌入演示数据，方便测试看板/排产/Agent
@@ -113,12 +124,20 @@ Docker Compose 默认启用 Phoenix。发起一次 AI 对话后，可打开 http
 
 以下能力代码已接好，但需要你提供凭证才生效（不提供也不影响其余功能）：
 
-- **AI Agent 对话**：在 `backend/.env` 设 `DEEPSEEK_API_KEY`，然后 `docker compose up -d --force-recreate backend`
+- **AI Agent 对话**：按 [openclaw/README.md](openclaw/README.md) 创建 `openclaw/.env`；旧 LangGraph 回退路径继续读取 `backend/.env` 的 `LLM_*`
 - **错误追踪（可选）**：设 `SENTRY_DSN` 启用 Sentry
 
 ### Phoenix 安全说明
 
 当前 Compose 配置面向本地或受信任内网，Phoenix UI 未开启认证。生产环境必须启用认证和访问控制、设置 Trace 保留期并固定 Phoenix 镜像版本；Prompt、回复和工具参数都可能进入 Trace。
+
+---
+
+## 生产部署
+
+根目录 `docker-compose.yml` 仅用于本地开发，不应直接部署到公网。腾讯云轻量服务器使用独立生产栈，包含 PostgreSQL、Casdoor、FastAPI、Next.js、OpenClaw 与 Caddy。Casdoor 使用独立数据库和数据库账号；初期不包含 Redis、Phoenix、Sentry 或 COS。ICP备案通过前只允许 SSH 隧道访问。
+
+完整安装、更新、备份、恢复、回滚和备案后启用 HTTPS 的步骤见 [deploy/production/README.md](deploy/production/README.md)。
 
 ---
 

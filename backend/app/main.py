@@ -38,14 +38,19 @@ setup_phoenix()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Bring up the LangGraph agent (checkpointer pool + compiled graph).
-    try:
-        await init_agent()
-        logger.info("agent_initialized")
-    except Exception as err:  # noqa: BLE001
-        logger.error("agent_init_failed", error=str(err))
+    # OpenClaw is reached lazily over HTTP. LangGraph still needs its Postgres
+    # checkpointer lifecycle when selected as the rollback runtime.
+    if settings.AGENT_RUNTIME == "langgraph":
+        try:
+            await init_agent()
+            logger.info("agent_initialized", runtime="langgraph")
+        except Exception as err:  # noqa: BLE001
+            logger.error("agent_init_failed", runtime="langgraph", error_type=type(err).__name__)
+    else:
+        logger.info("agent_initialized", runtime="openclaw")
     yield
-    await close_agent()
+    if settings.AGENT_RUNTIME == "langgraph":
+        await close_agent()
 
 
 app = FastAPI(title="FilmOS Backend", lifespan=lifespan)

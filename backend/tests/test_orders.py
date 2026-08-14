@@ -19,9 +19,30 @@ async def test_create_order_generates_order_no_and_increments(client):
     })).json()
 
     assert order1["order_no"].startswith("ORD-")
-    assert order1["order_no"].endswith("-001")
-    assert order2["order_no"].endswith("-002")
+    serial1 = int(order1["order_no"].rsplit("-", 1)[1])
+    serial2 = int(order2["order_no"].rsplit("-", 1)[1])
+    assert serial2 == serial1 + 1
     assert order1["status"] == "PENDING"
+
+
+async def test_order_no_is_not_reused_after_delete(client):
+    prod = await _make_product(client)
+    cust = await _make_customer(client)
+    payload = {
+        "customer_id": cust["id"],
+        "product_id": prod["id"],
+        "spec_params": {},
+        "quantity": 100,
+        "unit": "kg",
+    }
+    first = (await client.post("/api/orders", json=payload)).json()
+    await client.delete(f"/api/orders/{first['id']}")
+    second = (await client.post("/api/orders", json=payload)).json()
+
+    assert second["order_no"] != first["order_no"]
+    assert int(second["order_no"].rsplit("-", 1)[1]) > int(
+        first["order_no"].rsplit("-", 1)[1]
+    )
 
 
 async def test_create_order_snapshots_formula(client):

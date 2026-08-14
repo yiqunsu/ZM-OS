@@ -31,7 +31,8 @@ CREATE_ORDER = Skill(
         "query_customer",
         "query_product",
         "query_formula",
-        "confirm_and_create_order",
+        "draft_order",
+        "submit_order",
         "check_unfinished_task",
     ],
     loads_context=True,
@@ -75,7 +76,7 @@ _KEYWORDS: list[tuple[str, list[re.Pattern]]] = [
     (
         "create-order",
         [
-            re.compile(r"录单|录一张|新建订单|帮我录|帮我建单|下单|接单|建个单"),
+            re.compile(r"录单|录入|录一张|新建订单|新增订单|新订单|帮我录|帮我建单|下单|接单|建个单"),
             re.compile(r"有.*订单|订单.*帮我"),
         ],
     ),

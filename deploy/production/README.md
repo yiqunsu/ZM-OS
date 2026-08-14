@@ -1,0 +1,254 @@
+# FilmOS production deployment
+
+本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、Casdoor、OpenClaw 和 PostgreSQL 组成；Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
+
+ICP备案通过前，Caddy 只监听服务器 `127.0.0.1`，必须通过 SSH 隧道访问。备案通过前不要添加公网 DNS，也不要开放公网 80/443。
+
+## 1. 服务与数据边界
+
+- Caddy 是唯一发布宿主机端口的容器，分别代理 FilmOS 与 Casdoor 两个域名；
+- FastAPI、Next.js、Casdoor、OpenClaw 与 PostgreSQL 没有宿主机端口；
+- FilmOS 与 Casdoor 共用 PostgreSQL 进程，但使用不同数据库和不同登录账号；
+- OpenClaw 只与 FastAPI 共享私有 Agent 网络，不接收 Casdoor Token，也不连接数据库；
+- FilmOS 业务数据存于 `filmos_postgres_data`；Casdoor 账号、角色和应用配置也在该 PostgreSQL 卷的独立数据库中；
+- 聊天图片正文存于后端私有的 `filmos_chat_attachments` 卷，附件元数据仍在 FilmOS 数据库；
+- OpenClaw 的命名卷只保存非权威 Agent 上下文。
+
+## 2. 服务器准备
+
+服务器应为 Ubuntu 24.04 x86_64，并已安装 Docker 与 Compose：
+
+```bash
+docker --version
+docker compose version
+free -h
+df -h
+sudo install -d -o ubuntu -g ubuntu -m 0750 /opt/filmos
+```
+
+使用只读 GitHub deploy key 克隆仓库到 `/opt/filmos`。不要通过聊天、Git 或命令截图传输私钥、环境文件、密码或 API Key。
+
+## 3. 需要你确定和填写的值
+
+复制模板并限制权限：
+
+```bash
+cd /opt/filmos
+install -m 0600 deploy/production/.env.production.example deploy/production/.env.production
+nano deploy/production/.env.production
+```
+
+必须自行生成并保存以下秘密：
+
+```bash
+openssl rand -hex 24   # 两个数据库密码
+openssl rand -hex 32   # AUTH_SECRET、OIDC client secret、OpenClaw token
+openssl rand -hex 16   # OIDC client ID
+openssl rand -base64 32 # 两个 Casdoor 初始账号密码
+```
+
+需要做出的业务选择只有这几项：
+
+- `CASDOOR_ADMIN_EMAIL`：平台管理员邮箱；只用于 Casdoor 管理后台；
+- `CASDOOR_OWNER_NAME`：首个 FilmOS 管理员的 Casdoor 用户名；
+- `CASDOOR_OWNER_EMAIL`：必须与现有 FilmOS OWNER 的邮箱完全一致（忽略大小写），这样首次 OIDC 登录会保留原本的本地用户 ID、订单和 Agent 会话；
+- `CASDOOR_ADMIN_PASSWORD` 与 `CASDOOR_OWNER_PASSWORD`：两个不同的强密码；
+- `QWEN_API_KEY`：OpenClaw 使用的千问 API Key。
+
+`NEXT_PUBLIC_API_URL` 是写入前端浏览器 bundle 的构建期 API base，默认同源 `/api`。只有在 API 使用其他公开 origin 时才需要覆盖；修改后必须重新运行部署脚本以重建前端镜像，不能只重启容器。
+
+可选的电脑微信扫码登录还需要微信开放平台审核通过的“网站应用”凭证：
+
+- `WECHAT_LOGIN_ENABLED`：默认 `false`；只有备案、正式域名和 HTTPS 均生效后才能设为 `true`；
+- `WECHAT_OPEN_APP_ID`：网站应用 AppID；
+- `WECHAT_OPEN_APP_SECRET`：网站应用 AppSecret，只保存在服务器环境文件和 Casdoor 数据库中。
+
+不要把 Casdoor 平台管理员和日常 FilmOS OWNER 当成同一个账号。环境校验会拒绝占位符、弱默认管理员密码、重复数据库角色、错误域名和不精确的 callback URL。
+
+## 4. 备案期间的私有部署
+
+保留模板中的私有地址：
+
+```dotenv
+WEB_BIND_IP=127.0.0.1
+APP_SITE_ADDRESS=http://app.filmos.test
+AUTH_SITE_ADDRESS=http://auth.filmos.test
+APP_PUBLIC_URL=http://app.filmos.test:8080
+NEXTAUTH_URL=http://app.filmos.test:8080
+CASDOOR_ISSUER=http://auth.filmos.test:8080
+CASDOOR_REDIRECT_URI=http://app.filmos.test:8080/api/auth/callback/casdoor
+```
+
+校验并部署：
+
+```bash
+./deploy/production/scripts/validate-env.sh
+./deploy/production/scripts/deploy.sh
+```
+
+首次部署会：
+
+1. 顺序构建后端和前端，降低 2c/4GB 主机峰值内存；
+2. 创建独立的 Casdoor 数据库账号和数据库；
+3. 在 `.data/casdoor/` 生成权限为 `0600` 的运行配置和初始化数据；
+4. 用强密码替换 Casdoor 的 `built-in/admin` 默认账号，创建 `filmos` 组织、OIDC 应用、签名证书、`filmos-owner` 与 `filmos-operator`；
+5. 将初始化切换为 create-only，后续重启不会覆盖新增用户和角色成员；
+6. 备份已有数据库、执行 Alembic migration，再启动应用入口。
+
+在本地 Mac 的 `/etc/hosts` 增加：
+
+```text
+127.0.0.1 app.filmos.test auth.filmos.test
+```
+
+然后保持 SSH 隧道运行：
+
+```bash
+ssh -L 8080:127.0.0.1:80 ubuntu@42.192.114.38
+```
+
+访问 [http://app.filmos.test:8080](http://app.filmos.test:8080)。OIDC 会跳转到 `auth.filmos.test:8080`，两个地址必须都从同一隧道访问。
+
+首次验证时确认：
+
+- 用 `CASDOOR_OWNER_NAME` / `CASDOOR_OWNER_PASSWORD` 登录 FilmOS；
+- `/api/auth/me` 返回原有 FilmOS OWNER 的同一个本地 ID；
+- 原有订单与 Agent 会话仍可见；
+- 退出后再次打开 FilmOS 不会静默恢复上一个人的 Casdoor 会话。
+
+## 5. Casdoor 用户与角色管理
+
+通过 `http://auth.filmos.test:8080`（公网启用后为 `https://auth.zmorder.cn`）登录 Casdoor 管理后台。平台管理使用 `built-in/admin` 与 `CASDOOR_ADMIN_PASSWORD`。
+
+新增业务用户时：
+
+1. 用户必须属于 `filmos` 组织并填写唯一有效邮箱；
+2. 只分配 `filmos-owner` 或 `filmos-operator` 其中一个角色；
+3. 不要开启 FilmOS 应用的自助注册；
+4. 不要启用动态客户端注册；
+5. 角色变化最多在当前 15 分钟 access token 到期后生效。
+
+`filmos-owner` 可修改基础数据；`filmos-operator` 可读取基础数据并管理订单、生产任务及自己的 Agent 会话。账号和角色不在 FilmOS 页面内维护。
+
+### 5.1 电脑微信扫码登录（可选）
+
+微信扫码只支持微信开放平台的“网站应用”，授权回调域填写 `auth.zmorder.cn`。备案、DNS、HTTPS 和微信应用审核全部生效前保持：
+
+```dotenv
+WECHAT_LOGIN_ENABLED=false
+WECHAT_OPEN_APP_ID=
+WECHAT_OPEN_APP_SECRET=
+```
+
+全新 Casdoor 数据库可在公网首次部署前填写 AppID/AppSecret 并将开关改为 `true`，初始化程序会创建 `OAuth / WeChat / Web` Provider。配置固定为允许登录和解绑、禁止注册，并使用空 binding rule 禁止按昵称、邮箱或手机号自动合并账号。密码入口会保留。
+
+已有 Casdoor 数据库不会由部署脚本直接改写内部表。先以 `built-in/admin` 登录 Casdoor 控制台并完成以下操作：
+
+1. 在 Providers 新增 `OAuth / WeChat / Web`，名称为 `provider-wechat-web`，填写网站应用 AppID/AppSecret；
+2. 编辑 `app-filmos`，绑定该 Provider，开启 Can signin/Can unlink，关闭 Can signup，并清空 Binding rule；
+3. 在 Signin methods 保留 Password，并新增 `WeChat`、规则选择 `Tab`；
+4. 再把环境开关设为 `true` 并运行部署。验证脚本会在配置不完整时停止发布。
+
+员工采用邀请制：
+
+1. 管理员在 `filmos` 组织创建用户，填写与 FilmOS 相同的唯一邮箱和临时强密码；
+2. 只把用户加入 `filmos-owner` 或 `filmos-operator` 其中一个角色；
+3. 员工首次使用临时密码登录 Casdoor，在账号设置的第三方账号区域绑定微信；
+4. 退出后重新从 FilmOS 发起登录，使用微信二维码验证；
+5. 未绑定的陌生微信必须得到“不允许注册/请联系管理员”的拒绝，不得创建业务账号。
+
+若微信服务不可用，员工仍可使用 Casdoor 密码登录。紧急关闭入口时将 `WECHAT_LOGIN_ENABLED=false`，并在 Casdoor `app-filmos` 中移除微信登录方式；不要删除用户、角色或已经保存的微信标识。
+
+## 6. 日常更新、健康和日志
+
+```bash
+cd /opt/filmos
+git status --short
+git pull --ff-only
+./deploy/production/scripts/deploy.sh
+
+docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml ps
+docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 casdoor
+docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 backend
+docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 frontend
+docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 openclaw
+```
+
+所有容器使用 `10MB × 3` 的 Docker JSON 日志轮转。不要用 `git reset --hard` 处理服务器上的异常改动。
+
+## 7. 成组备份
+
+```bash
+./deploy/production/scripts/backup.sh manual
+```
+
+每次成功会生成同一时间戳的四个文件：
+
+- `filmos_...dump`：FilmOS 业务数据库；
+- `casdoor_...dump`：Casdoor 登录与角色数据库；
+- `chat_attachments_...tar.gz`：聊天图片附件卷；
+- `backup_...sha256`：两份 dump 和附件归档的校验清单。
+
+只有两份 dump 能被 `pg_restore --list` 读取且附件归档能被 `tar` 校验后，备份才算成功。数据库与附件必须使用同一时间戳的一组文件恢复；可用 cron 每天执行并清理超过七天的旧备份。在没有 COS 的阶段，应定期把一整组文件下载到另一台设备。本机备份无法抵御整台服务器或云账号丢失。
+
+## 8. 恢复
+
+恢复会替换目标数据库并丢弃备份时间点之后的写入，必须明确确认。先在可读时再做一份最新备份。
+
+恢复 FilmOS：
+
+```bash
+./deploy/production/scripts/restore.sh \
+  /opt/filmos/.data/backups/filmos_TIMESTAMP_manual.dump \
+  --confirm-database-replacement
+```
+
+恢复 Casdoor：
+
+```bash
+./deploy/production/scripts/restore-casdoor.sh \
+  /opt/filmos/.data/backups/casdoor_TIMESTAMP_manual.dump \
+  --confirm-database-replacement
+```
+
+恢复同一时间戳的聊天附件：
+
+```bash
+./deploy/production/scripts/restore-attachments.sh \
+  /opt/filmos/.data/backups/chat_attachments_TIMESTAMP_manual.tar.gz \
+  --confirm-attachment-replacement
+```
+
+恢复失败会保持应用写入服务停止，避免在半恢复状态继续产生数据。应优先使用同一 manifest 中的数据库和附件备份；只恢复其中一项前必须理解身份配置、业务用户映射或附件元数据可能出现的时间差。
+
+## 9. ICP 通过后启用公网
+
+先为 `app.zmorder.cn` 和 `auth.zmorder.cn` 都添加指向 `42.192.114.38` 的 A 记录，并开放 TCP 80/443。然后只修改以下环境值：
+
+```dotenv
+WEB_BIND_IP=0.0.0.0
+APP_SITE_ADDRESS=app.zmorder.cn
+AUTH_SITE_ADDRESS=auth.zmorder.cn
+APP_PUBLIC_URL=https://app.zmorder.cn
+NEXTAUTH_URL=https://app.zmorder.cn
+CASDOOR_ISSUER=https://auth.zmorder.cn
+CASDOOR_REDIRECT_URI=https://app.zmorder.cn/api/auth/callback/casdoor
+```
+
+重新运行校验和部署。初始化时已经白名单化私有与正式域名的精确 callback/logout URL，不使用通配符；Casdoor issuer 会由运行配置切换到正式 HTTPS 地址。
+
+上线前还必须：
+
+- 在页面展示真实 ICP 备案号及规定链接；
+- 验证两个域名的 HTTPS、OIDC discovery、JWKS、登录、刷新、退出、OWNER/OPERATOR 权限和 Agent SSE；
+- 按要求完成公安联网备案；
+- 若失败，暂停 DNS/关闭公网 80/443，恢复私有环境值后重新部署。
+
+## 10. 不可跨越的边界
+
+- 不公开 PostgreSQL 5432、FastAPI 8000、Next.js 3000、Casdoor 8000 或 OpenClaw 18789；
+- 不把 `.env.production`、`.data/`、Token、密码或证书私钥提交到 Git；
+- 不把 Casdoor Token 发送给 OpenClaw，不把 OpenClaw Gateway Token 发送给前端或 Casdoor；
+- 不为了“未来可能需要”提前加入 Redis；
+- 不在未明确访问控制、保留策略、隐私与成本前把 Phoenix、Sentry 或 Loki 加入生产；
+- 不自动恢复迁移前备份。数据库恢复是破坏性操作，必须人工选择。

@@ -31,19 +31,81 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    env_file: ./backend/.env
+    env_file:
+      - ./backend/.env
+      - path: ./openclaw/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://filmos:filmos@postgres:5432/filmos
       REDIS_URL: redis://redis:6379
+      AGENT_RUNTIME: ${AGENT_RUNTIME:-openclaw}
+      OPENCLAW_BASE_URL: http://openclaw:18789
+      OPENCLAW_AGENT_ID: filmos-web
+      CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
       PHOENIX_ENABLED: "true"
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
     depends_on:
       - postgres
       - redis
       - phoenix
+    networks:
+      - default
+      - agent
+
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:2026.7.1-slim@sha256:6a31d44b2944e7adcd2b582bf6fb463111264ebca97a0201795b799135bd102c
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./backend/.env
+      - path: ./openclaw/.env
+        required: false
+    environment:
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /workspace
+      OPENCLAW_DISABLE_BONJOUR: "1"
+    command:
+      [
+        "sh",
+        "-lc",
+        "cp /etc/openclaw/openclaw.seed.json /home/node/.openclaw/openclaw.json && chmod 600 /home/node/.openclaw/openclaw.json && exec node openclaw.mjs gateway --bind lan --port 18789",
+      ]
+    volumes:
+      - ./openclaw/config/openclaw.json:/etc/openclaw/openclaw.seed.json:ro
+      - ./openclaw/workspace:/workspace:ro
+      - openclaw_state:/home/node/.openclaw
+    networks:
+      openclaw_egress:
+        gw_priority: 1
+      agent:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:18789/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
     ports:
       - "3000:3000"
     env_file: ./frontend/.env.local
@@ -53,3 +115,10 @@ services:
 volumes:
   pgdata:
   phoenixdata:
+  openclaw_state:
+  chat_attachments:
+
+networks:
+  agent:
+    internal: true
+  openclaw_egress:

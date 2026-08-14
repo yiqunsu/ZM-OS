@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input }    from "@/components/ui/input";
 import { Label }    from "@/components/ui/label";
@@ -106,12 +106,54 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/* ─── Public types (shared with the chat co-pilot) ─── */
+export interface OrderDraft {
+  customer_id?: string;
+  product_id?: string;
+  spec_params?: Record<string, string>;
+  quantity?: number | string;
+  unit?: "kg" | "t";
+  formula_mode?: FormulaMode;
+  formula_id?: string;
+  formula_materials?: string;
+  new_formula_name?: string;
+  new_formula_materials?: string;
+  extra_notes?: string;
+}
+
+export interface OrderFormHandle {
+  /** Submit the form using its *current* values (used by the agent's「下发」path). */
+  submit: () => Promise<boolean>;
+}
+
+interface OrderFormProps {
+  orderId?: string;
+  /** "page" = standalone route; "panel" = embedded in the chat split view. */
+  variant?: "page" | "panel";
+  /** Fields pushed by the agent; applied progressively, never overwriting user-edited fields. */
+  draft?: OrderDraft | null;
+  /** Persist the user's current panel values so the workspace survives a reload. */
+  onDraftChange?: (draft: OrderDraft) => void;
+  /** Called after a successful create/update instead of navigating (panel variant). */
+  onSubmitted?: (order: { order_no?: string; id?: string }) => void;
+  /** Cancel handler (panel variant); falls back to router.back(). */
+  onCancel?: () => void;
+}
+
 /* ═══════════════════════════════════════
    Main Component
 ═══════════════════════════════════════ */
-export default function OrderForm({ orderId }: { orderId?: string }) {
+const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm(
+  { orderId, variant = "page", draft = null, onDraftChange, onSubmitted, onCancel },
+  ref,
+) {
   const router  = useRouter();
   const isEdit  = Boolean(orderId);
+  const isPanel = variant === "panel";
+
+  /* Fields the user has manually edited — the agent's draft must not overwrite these. */
+  const dirty = useRef<Set<string>>(new Set());
+  const markDirty = useCallback((field: string) => { dirty.current.add(field); }, []);
 
   /* Reference data */
   const [customers,  setCustomers]  = useState<Customer[]>([]);
@@ -121,6 +163,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
 
   /* Page state */
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState("");
 
@@ -159,46 +202,119 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
   /* ─── Load ─── */
   async function load() {
     setLoading(true);
-    const [c, cat, p, f] = await Promise.all([
-      api.get<Customer[]>("/customers"),
-      api.get<Category[]>("/product-categories"),
-      api.get<Product[]>("/products"),
-      api.get<Formula[]>("/formulas"),
-    ]);
-    setCustomers(c);
-    setCategories(cat);
-    setProducts(p);
-    setFormulas(f);
+    setLoadFailed(false);
+    try {
+      const [c, cat, p, f] = await Promise.all([
+        api.get<Customer[]>("/customers"),
+        api.get<Category[]>("/product-categories"),
+        api.get<Product[]>("/products"),
+        api.get<Formula[]>("/formulas"),
+      ]);
+      setCustomers(c);
+      setCategories(cat);
+      setProducts(p);
+      setFormulas(f);
 
-    if (orderId) {
-      const order = await api.get<{
-        customer_id: string; product_id: string; spec_params: Record<string, string>;
-        quantity: number; unit: string; extra_notes: string | null; formula_id: string | null;
-      }>(`/orders/${orderId}`);
-      const fId = order.formula_id ?? "";
-      const matchedFormula: Formula | undefined = f.find((x) => x.id === fId);
-      setForm({
-        customerId:  order.customer_id,
-        productId:   order.product_id,
-        specParams:  objToSpecParams(order.spec_params),
-        quantity:    String(order.quantity),
-        unit:        order.unit as "kg" | "t",
-        extraNotes:  order.extra_notes ?? "",
-        formulaMode: fId ? "existing" : "none",
-        formulaId:   fId,
-        formulaMaterials:    matchedFormula?.materials ?? "",
-        newFormulaName:      "",
-        newFormulaMaterials: "",
-      });
-      if (matchedFormula) {
-        setOrigFormulaSpecParams(matchedFormula.spec_params);
-        setOrigFormulaMaterials(matchedFormula.materials);
+      if (orderId) {
+        const order = await api.get<{
+          customer_id: string; product_id: string; spec_params: Record<string, string>;
+          quantity: number; unit: string; extra_notes: string | null; formula_id: string | null;
+        }>(`/orders/${orderId}`);
+        const fId = order.formula_id ?? "";
+        const matchedFormula: Formula | undefined = f.find((x) => x.id === fId);
+        setForm({
+          customerId:  order.customer_id,
+          productId:   order.product_id,
+          specParams:  objToSpecParams(order.spec_params),
+          quantity:    String(order.quantity),
+          unit:        order.unit as "kg" | "t",
+          extraNotes:  order.extra_notes ?? "",
+          formulaMode: fId ? "existing" : "none",
+          formulaId:   fId,
+          formulaMaterials:    matchedFormula?.materials ?? "",
+          newFormulaName:      "",
+          newFormulaMaterials: "",
+        });
+        if (matchedFormula) {
+          setOrigFormulaSpecParams(matchedFormula.spec_params);
+          setOrigFormulaMaterials(matchedFormula.materials);
+        }
       }
+      setError("");
+    } catch (loadError) {
+      setLoadFailed(true);
+      setError(loadError instanceof Error ? loadError.message : "表单数据加载失败，请重试");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   useEffect(() => { load(); }, []);
+
+  /* ─── Agent draft → form (progressive, respects manual edits) ─── */
+  useEffect(() => {
+    if (!draft) return;
+    setForm((prev) => {
+      const next: FormState = { ...prev };
+      if (draft.customer_id !== undefined && !dirty.current.has("customerId")) {
+        next.customerId = draft.customer_id;
+      }
+      if (draft.product_id !== undefined && !dirty.current.has("productId")) {
+        if (draft.product_id !== prev.productId && draft.formula_id === undefined) {
+          next.formulaId = ""; next.formulaMaterials = "";
+        }
+        next.productId = draft.product_id;
+      }
+      if (draft.spec_params !== undefined && !dirty.current.has("specParams")) {
+        next.specParams = objToSpecParams(draft.spec_params);
+      }
+      if (draft.quantity !== undefined && !dirty.current.has("quantity")) {
+        next.quantity = String(draft.quantity);
+      }
+      if (draft.unit !== undefined && !dirty.current.has("unit") && (draft.unit === "kg" || draft.unit === "t")) {
+        next.unit = draft.unit;
+      }
+      if (draft.formula_mode !== undefined && !dirty.current.has("formula")) {
+        next.formulaMode = draft.formula_mode;
+      }
+      if (draft.formula_id !== undefined && !dirty.current.has("formula")) {
+        const f = formulas.find((x) => x.id === draft.formula_id);
+        next.formulaMode = draft.formula_id ? "existing" : (draft.formula_mode ?? next.formulaMode);
+        next.formulaId = draft.formula_id;
+        if (f) next.formulaMaterials = f.materials;
+      }
+      if (draft.formula_materials !== undefined && !dirty.current.has("formula")) {
+        next.formulaMaterials = draft.formula_materials;
+      }
+      if (draft.new_formula_name !== undefined && !dirty.current.has("formula")) {
+        next.newFormulaName = draft.new_formula_name;
+      }
+      if (draft.new_formula_materials !== undefined && !dirty.current.has("formula")) {
+        next.newFormulaMaterials = draft.new_formula_materials;
+      }
+      if (draft.extra_notes !== undefined && !dirty.current.has("extraNotes")) {
+        next.extraNotes = draft.extra_notes;
+      }
+      return next;
+    });
+  }, [draft, formulas]);
+
+  useEffect(() => {
+    if (!isPanel || loading || dirty.current.size === 0 || !onDraftChange) return;
+    onDraftChange({
+      customer_id: form.customerId,
+      product_id: form.productId,
+      spec_params: specParamsToObj(form.specParams),
+      quantity: form.quantity,
+      unit: form.unit,
+      formula_mode: form.formulaMode,
+      formula_id: form.formulaId,
+      formula_materials: form.formulaMaterials,
+      new_formula_name: form.newFormulaName,
+      new_formula_materials: form.newFormulaMaterials,
+      extra_notes: form.extraNotes,
+    });
+  }, [form, isPanel, loading, onDraftChange]);
 
   /* ─── Formula select ─── */
   function handleFormulaSelect(fId: string) {
@@ -272,6 +388,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
         company: newCustomerCompany.trim(), contact: newCustomerContact.trim(),
       });
       setCustomers((prev) => [...prev, created].sort((a, b) => a.company.localeCompare(b.company)));
+      markDirty("customerId");
       setForm((f) => ({ ...f, customerId: created.id }));
       setNewCustomerOpen(false);
       setNewCustomerCompany("");
@@ -295,6 +412,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
       setProducts((prev) => [...prev, created].sort((a, b) =>
         a.category.name.localeCompare(b.category.name) || a.name.localeCompare(b.name)
       ));
+      markDirty("productId");
       setForm((f) => ({ ...f, productId: created.id, formulaId: "", formulaMaterials: "" }));
       setNewProductOpen(false);
       setNewProductName("");
@@ -307,17 +425,18 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
   }
 
   /* ─── Submit order ─── */
-  async function handleSave() {
-    if (!form.customerId) { setError("请选择客户"); return; }
-    if (!form.productId)  { setError("请选择产品"); return; }
-    if (!form.quantity || Number(form.quantity) <= 0) { setError("请填写有效的数量"); return; }
+  async function handleSave(): Promise<boolean> {
+    if (saving) return false;
+    if (!form.customerId) { setError("请选择客户"); return false; }
+    if (!form.productId)  { setError("请选择产品"); return false; }
+    if (!form.quantity || Number(form.quantity) <= 0) { setError("请填写有效的数量"); return false; }
 
     setSaving(true); setError("");
     try {
       let formulaId: string | null = null;
 
       if (form.formulaMode === "new") {
-        if (!form.newFormulaName.trim()) { setError("请填写配方名称"); setSaving(false); return; }
+        if (!form.newFormulaName.trim()) { setError("请填写配方名称"); setSaving(false); return false; }
         try {
           const created = await api.post<Formula>("/formulas", {
             name:        form.newFormulaName.trim(),
@@ -329,7 +448,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
         } catch {
           setError("配方创建失败");
           setSaving(false);
-          return;
+          return false;
         }
       } else if (form.formulaMode === "existing" && form.formulaId) {
         formulaId = form.formulaId;
@@ -344,15 +463,22 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
         formula_id:  formulaId,
         extra_notes: form.extraNotes,
       };
-      if (isEdit) await api.put(`/orders/${orderId}`, payload);
-      else await api.post("/orders", payload);
-      router.push("/orders");
+      const result = isEdit
+        ? await api.put<{ order_no?: string; id?: string }>(`/orders/${orderId}`, payload)
+        : await api.post<{ order_no?: string; id?: string }>("/orders", payload);
+      if (onSubmitted) onSubmitted(result ?? {});
+      else router.push("/orders");
+      return true;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "保存失败");
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  /* Expose submit() so the agent's「确认下发」can trigger the same create path. */
+  useImperativeHandle(ref, () => ({ submit: handleSave }));
 
   const selectedProduct    = products.find((p) => p.id === form.productId);
   const selectedCategoryId = selectedProduct?.category_id;
@@ -367,12 +493,15 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
     return <div className="py-16 text-center text-sm text-slate-400">加载中…</div>;
   }
 
-  return (
-    <div className="max-w-3xl mx-auto py-8 px-4 space-y-5">
+  const submitLabel = saving ? "保存中…" : isEdit ? "保存修改" : isPanel ? "下发订单" : "创建订单";
+  const handleCancel = () => (onCancel ? onCancel() : router.back());
+
+  const sections = (
+    <>
 
       {/* ── Section 1: 基本信息 ── */}
       <Section title="基本信息">
-        <div className="grid grid-cols-2 gap-5">
+        <div className={`grid ${isPanel ? "grid-cols-1 md:grid-cols-2" : "grid-cols-2"} gap-5`}>
 
           {/* 客户 */}
           <div className="space-y-1.5">
@@ -380,7 +509,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
             <div className="flex gap-2">
               <select
                 value={form.customerId}
-                onChange={(e) => set("customerId", e.target.value)}
+                onChange={(e) => { markDirty("customerId"); set("customerId", e.target.value); }}
                 className="flex-1 min-w-0 h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
               >
                 <option value="">请选择客户</option>
@@ -405,7 +534,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
             <div className="flex gap-2">
               <select
                 value={form.productId}
-                onChange={(e) => setForm((f) => ({ ...f, productId: e.target.value, formulaId: "", formulaMaterials: "" }))}
+                onChange={(e) => { markDirty("productId"); setForm((f) => ({ ...f, productId: e.target.value, formulaId: "", formulaMaterials: "" })); }}
                 className="flex-1 min-w-0 h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
               >
                 <option value="">请选择产品</option>
@@ -434,7 +563,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
               min="0"
               step="any"
               value={form.quantity}
-              onChange={(e) => set("quantity", e.target.value)}
+              onChange={(e) => { markDirty("quantity"); set("quantity", e.target.value); }}
               placeholder="如：500"
               className="border-slate-200 focus:border-blue-400 focus:ring-blue-400"
             />
@@ -446,7 +575,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
             <div className="flex gap-4 h-9 items-center">
               {(["kg", "t"] as const).map((u) => (
                 <label key={u} className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="unit" value={u} checked={form.unit === u} onChange={() => set("unit", u)} className="accent-blue-600" />
+                  <input type="radio" name="unit" value={u} checked={form.unit === u} onChange={() => { markDirty("unit"); set("unit", u); }} className="accent-blue-600" />
                   <span className="text-sm text-slate-700">{u}</span>
                 </label>
               ))}
@@ -457,7 +586,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
 
       {/* ── Section 2: 规格参数 ── */}
       <Section title="规格参数">
-        <SpecParamRows rows={form.specParams} onChange={(rows) => set("specParams", rows)} />
+        <SpecParamRows rows={form.specParams} onChange={(rows) => { markDirty("specParams"); set("specParams", rows); }} />
       </Section>
 
       {/* ── Section 3: 配方 ── */}
@@ -474,7 +603,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
                 name="formulaMode"
                 value={mode}
                 checked={form.formulaMode === mode}
-                onChange={() => setForm((f) => ({ ...f, formulaMode: mode, formulaId: "", formulaMaterials: "" }))}
+                onChange={() => { markDirty("formula"); setForm((f) => ({ ...f, formulaMode: mode, formulaId: "", formulaMaterials: "" })); }}
                 className="accent-blue-600"
               />
               <span className="text-sm text-slate-700">{label}</span>
@@ -494,7 +623,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
               ) : (
                 <select
                   value={form.formulaId}
-                  onChange={(e) => handleFormulaSelect(e.target.value)}
+                  onChange={(e) => { markDirty("formula"); handleFormulaSelect(e.target.value); }}
                   className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
                 >
                   <option value="">请选择配方</option>
@@ -515,7 +644,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
                   <Label className="text-slate-700 text-sm font-medium">原材料及比例</Label>
                   <Textarea
                     value={form.formulaMaterials}
-                    onChange={(e) => set("formulaMaterials", e.target.value)}
+                    onChange={(e) => { markDirty("formula"); set("formulaMaterials", e.target.value); }}
                     rows={4}
                     placeholder={"例：\nXX树脂 60%\nYY添加剂 30%"}
                     className="border-slate-200 focus:border-blue-400 focus:ring-blue-400 resize-none text-sm"
@@ -554,7 +683,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
               <Label className="text-slate-700 text-sm font-medium">配方名称 <span className="text-red-400">*</span></Label>
               <Input
                 value={form.newFormulaName}
-                onChange={(e) => set("newFormulaName", e.target.value)}
+                onChange={(e) => { markDirty("formula"); set("newFormulaName", e.target.value); }}
                 placeholder="如：PE-50μm-透明-001"
                 className="border-slate-200 focus:border-blue-400 focus:ring-blue-400"
               />
@@ -563,7 +692,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
               <Label className="text-slate-700 text-sm font-medium">原材料及比例</Label>
               <Textarea
                 value={form.newFormulaMaterials}
-                onChange={(e) => set("newFormulaMaterials", e.target.value)}
+                onChange={(e) => { markDirty("formula"); set("newFormulaMaterials", e.target.value); }}
                 rows={4}
                 placeholder={"例：\nXX树脂 60%\nYY添加剂 30%\nZZ助剂 10%"}
                 className="border-slate-200 focus:border-blue-400 focus:ring-blue-400 resize-none text-sm"
@@ -582,7 +711,7 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
       <Section title="额外要求">
         <Textarea
           value={form.extraNotes}
-          onChange={(e) => set("extraNotes", e.target.value)}
+          onChange={(e) => { markDirty("extraNotes"); set("extraNotes", e.target.value); }}
           placeholder="可选：交期要求、包装规格、特殊注意事项…"
           rows={3}
           className="border-slate-200 focus:border-blue-400 focus:ring-blue-400 resize-none"
@@ -590,13 +719,35 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
       </Section>
 
       {error && (
-        <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>
+        <div className="flex items-center justify-between gap-3 rounded-md border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-500">
+          <span>{error}</span>
+          {loadFailed && (
+            <button type="button" onClick={() => void load()} className="shrink-0 font-medium text-red-600 hover:text-red-700">
+              重试加载
+            </button>
+          )}
+        </div>
       )}
+    </>
+  );
 
-      <div className="flex items-center justify-end gap-3 pt-2 pb-8">
-        <Button type="button" variant="outline" onClick={() => router.back()} className="border-slate-200 text-slate-600">取消</Button>
-        <Button type="button" onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
-          {saving ? "保存中…" : isEdit ? "保存修改" : "创建订单"}
+  return (
+    <div className={isPanel ? "flex flex-col flex-1 min-h-0" : "max-w-3xl mx-auto py-8 px-4 space-y-5"}>
+      {isPanel
+        ? <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">{sections}</div>
+        : sections}
+
+      <div className={isPanel
+        ? "shrink-0 border-t border-slate-200 bg-white px-4 py-3 flex items-center justify-end gap-3"
+        : "flex items-center justify-end gap-3 pt-2 pb-8"}>
+        <Button type="button" variant="outline" onClick={handleCancel} className="border-slate-200 text-slate-600">取消</Button>
+        <Button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className={`${isPanel ? "bg-[#C8331F] hover:bg-[#a82a19]" : "bg-blue-600 hover:bg-blue-700"} text-white px-6`}
+        >
+          {submitLabel}
         </Button>
       </div>
 
@@ -707,4 +858,6 @@ export default function OrderForm({ orderId }: { orderId?: string }) {
       </Dialog>
     </div>
   );
-}
+});
+
+export default OrderForm;

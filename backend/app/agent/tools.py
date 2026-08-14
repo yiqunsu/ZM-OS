@@ -110,6 +110,47 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "draft_order",
+            "description": (
+                "把当前已识别到的订单字段同步到右侧「录入订单」表单。录单过程中，每当你新识别或"
+                "更新了任何字段（客户、产品、规格参数、数量、单位、配方、备注），立即调用此工具，"
+                "只需传当前已知的字段（未知字段不要传、不要猜）。可多次调用逐步补全。"
+                "这不是写操作，不会创建订单，只是让表单跟着对话实时填充。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "string", "description": "客户 ID（对照【客户列表】解析）"},
+                    "product_id": {"type": "string", "description": "产品 ID（对照【产品列表】解析）"},
+                    "spec_params": {
+                        "type": "object",
+                        "description": '规格参数，如 {"厚度": "50μm", "宽度": "600mm"}',
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "quantity": {"type": "number", "description": "数量"},
+                    "unit": {"type": "string", "enum": ["kg", "t"], "description": "单位"},
+                    "formula_id": {"type": "string", "description": "配方 ID（可选）"},
+                    "extra_notes": {"type": "string", "description": "额外要求或备注（可选）"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_order",
+            "description": (
+                "下发（创建）当前正在录入的订单。当老板明确表示确认下发/创建这张订单时"
+                "（如「确认下发」「就这样下单」「创建吧」）才调用。系统会用表单当前内容创建订单，"
+                "你不需要重复字段，也不要自己编造订单号——调用后简短回应「好的，正在为你下发」即可。"
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_order",
             "description": "修改已有订单的字段。这是写操作，调用后系统会显示确认卡片等待老板确认。",
             "parameters": {
@@ -226,6 +267,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 # 需要老板确认才能执行的写操作
 WRITE_TOOLS: set[str] = {"confirm_and_create_order", "update_order", "confirm_and_execute"}
 
+# 协同录单信号工具：不查库、不写库，只是驱动前端表单（填充 / 下发）。
+# 真正的 SSE 事件由 runner 检测工具调用后发出，这里仅返回一个 ack 让模型继续。
+_SIGNAL_TOOLS = {"draft_order", "submit_order"}
+
 # 纯 AI 推理型工具：无需查库，返回空对象让模型基于上下文推理
 _INFERENCE_TOOLS = {
     "extract_order_info",
@@ -247,6 +292,12 @@ def schemas_for(allowed: list[str]) -> list[dict[str, Any]]:
 async def run_read_tool(name: str, args: dict[str, Any]) -> Any:
     if name in _INFERENCE_TOOLS:
         return {}
+
+    if name == "draft_order":
+        return {"synced": True}
+    if name == "submit_order":
+        # 实际创建由前端用表单当前值走 POST /orders 完成（表单为唯一数据源）。
+        return {"submitting": True}
 
     async with async_session() as db:
         if name == "query_customer":

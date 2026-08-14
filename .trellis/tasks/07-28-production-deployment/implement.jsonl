@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/index.md","reason":"Apply shared cross-layer implementation and reuse guidance to the production deployment path."}
+{"file":".trellis/spec/backend/core/index.md","reason":"Preserve backend configuration, database, logging, and quality contracts while adding production operations."}
+{"file":".trellis/spec/frontend/ui/index.md","reason":"Preserve frontend build, type-safety, and quality conventions while changing deployment configuration."}

@@ -6,14 +6,16 @@ the request-scoped session), so here we point that sessionmaker at the test DB a
 clean up manually rather than relying on the transactional-rollback fixture.
 """
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.agent.skills as skills_mod
 import app.agent.tools as tools_mod
-from app.agent import skills, tools
-from app.models import Customer, Machine, Order, Product, ProductCategory
+from app.agent import graph, skills, tools
+from app.core.config import settings
+from app.models import ChatMessage, ChatSession, Customer, Machine, Order, Product, ProductCategory
 
 TEST_DB_URL = "postgresql+asyncpg://filmos:filmos@localhost:5432/filmos_test"
 
@@ -63,7 +65,9 @@ def test_skill_routing_general_fallback():
 
 def test_create_order_skill_restricts_tools():
     s = skills.resolve_skill("录单")
-    assert "confirm_and_create_order" in s.allowed_tools
+    assert "draft_order" in s.allowed_tools
+    assert "submit_order" in s.allowed_tools
+    assert "confirm_and_create_order" not in s.allowed_tools
     assert "confirm_and_execute" not in s.allowed_tools  # scheduling tool not exposed
 
 
@@ -71,6 +75,25 @@ def test_tool_schemas_cover_all_names():
     names = {t["function"]["name"] for t in tools.TOOL_SCHEMAS}
     assert "confirm_and_create_order" in names
     assert tools.WRITE_TOOLS <= names
+
+
+def test_model_uses_openai_compatible_settings(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-only-key")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setattr(settings, "LLM_MODEL", "test-model")
+
+    model = graph._build_model()
+
+    assert model.model_name == "test-model"
+    assert model.openai_api_base == "https://example.invalid/v1"
+    assert model.openai_api_key.get_secret_value() == "test-only-key"
+
+
+def test_model_requires_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "")
+
+    with pytest.raises(RuntimeError, match="LLM_API_KEY is not configured"):
+        graph._build_model()
 
 
 # ─── Read tools against test DB ─────────────────────────────────────────────
@@ -149,3 +172,35 @@ async def test_run_write_tool_creates_order(agent_db):
         from sqlalchemy import select
         oid = (await db.execute(select(Order.id).where(Order.order_no == result["order_no"]))).scalar_one()
         created["orders"].append(oid)
+
+
+async def test_submit_order_confirmation_is_consumed_once(client, db_session):
+    session = ChatSession(title="order form confirmation", user_id="test-user")
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(
+        ChatMessage(
+            session_id=session.id,
+            role="assistant",
+            tool_calls=[
+                {
+                    "name": "submit_order_form",
+                    "args": {},
+                    "display": {"message": "提交当前表单"},
+                }
+            ],
+            is_pending=True,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/agent/chat/confirm", json={"session_id": session.id}
+    )
+    assert response.status_code == 200
+    assert '"type": "form_submit"' in response.text
+
+    duplicate = await client.post(
+        "/api/agent/chat/confirm", json={"session_id": session.id}
+    )
+    assert duplicate.status_code == 404

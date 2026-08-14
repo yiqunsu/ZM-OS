@@ -10,11 +10,13 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models import ChatMessage, ChatSession
+from app.models import ChatAttachment, ChatMessage, ChatSession
+from app.services import chat_attachment_service
 
 
-async def list_sessions(db: AsyncSession) -> list[dict]:
+async def list_sessions(db: AsyncSession, user_id: str) -> list[dict]:
     result = await db.execute(
         select(
             ChatSession.id,
@@ -23,6 +25,7 @@ async def list_sessions(db: AsyncSession) -> list[dict]:
             func.count(ChatMessage.id).label("message_count"),
         )
         .outerjoin(ChatMessage, ChatMessage.session_id == ChatSession.id)
+        .where(ChatSession.user_id == user_id)
         .group_by(ChatSession.id)
         .order_by(ChatSession.created_at.desc())
     )
@@ -32,44 +35,91 @@ async def list_sessions(db: AsyncSession) -> list[dict]:
     ]
 
 
-async def create_session(db: AsyncSession) -> ChatSession:
+async def create_session(db: AsyncSession, user_id: str) -> ChatSession:
     title = datetime.now().strftime("%Y-%m-%d %H:%M")
-    session = ChatSession(title=title)
+    session = ChatSession(title=title, user_id=user_id)
     db.add(session)
     await db.commit()
     await db.refresh(session)
     return session
 
 
-async def delete_session(db: AsyncSession, session_id: str) -> None:
+async def delete_session(db: AsyncSession, session_id: str, user_id: str) -> None:
+    await require_session(db, session_id, user_id)
+    storage_keys = list(
+        (
+            await db.execute(
+                select(ChatAttachment.storage_key)
+                .join(ChatMessage, ChatMessage.id == ChatAttachment.message_id)
+                .where(ChatMessage.session_id == session_id)
+            )
+        ).scalars()
+    )
     await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
-    await db.execute(delete(ChatSession).where(ChatSession.id == session_id))
+    await db.execute(delete(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id))
     await db.commit()
+    await chat_attachment_service.delete_files(storage_keys)
 
 
-async def get_history(db: AsyncSession, session_id: str) -> list[ChatMessage]:
+async def get_history(db: AsyncSession, session_id: str, user_id: str) -> list[ChatMessage]:
+    await require_session(db, session_id, user_id)
     result = await db.execute(
         select(ChatMessage)
+        .options(selectinload(ChatMessage.attachments))
         .where(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.created_at.asc())
     )
     return list(result.scalars().all())
 
 
-async def require_session(db: AsyncSession, session_id: str) -> ChatSession:
-    session = await db.get(ChatSession, session_id)
+async def require_session(db: AsyncSession, session_id: str, user_id: str) -> ChatSession:
+    result = await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+    )
+    session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(404, "Session 不存在")
     return session
 
 
-async def get_pending(db: AsyncSession, session_id: str) -> ChatMessage | None:
-    result = await db.execute(
+async def get_pending(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str,
+    *,
+    for_update: bool = False,
+) -> ChatMessage | None:
+    await require_session(db, session_id, user_id)
+    statement = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id, ChatMessage.is_pending.is_(True))
         .order_by(ChatMessage.created_at.desc())
     )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await db.execute(statement)
     return result.scalars().first()
+
+
+async def clear_workspace(db: AsyncSession, session_id: str, user_id: str) -> None:
+    session = await require_session(db, session_id, user_id)
+    session.active_workspace = None
+    session.workspace_state = None
+    await db.commit()
+
+
+async def save_order_workspace_draft(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str,
+    draft: dict,
+) -> ChatSession:
+    session = await require_session(db, session_id, user_id)
+    session.active_workspace = "order_form"
+    session.workspace_state = {"order_draft": draft}
+    await db.commit()
+    await db.refresh(session)
+    return session
 
 
 async def add_message(

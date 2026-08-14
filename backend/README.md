@@ -34,7 +34,7 @@ flowchart TD
 
 > `app/repositories/` 是预留的数据访问层目录，当前数据访问仍写在 Service 里；将来复杂度上来后可把查询下沉到 Repository。
 
-领域划分：`Order`（订单）、`Production`（排产/看板）、`MasterData`（客户/产品/配方/机器/品类）、`Auth`（鉴权）、`Agent`（AI 对话）。
+领域划分：`Order`（订单）、`Production`（排产/看板）、`MasterData`（客户/产品/配方/机器/品类）、`Auth`（Casdoor 身份映射与 RBAC）、`Agent`（AI 对话）。
 
 ---
 
@@ -46,7 +46,7 @@ app/
 ├── core/              # 配置、数据库、鉴权、日志等基础设施
 │   ├── config.py      #   环境变量（Settings）
 │   ├── database.py    #   async engine + session
-│   ├── security.py    #   密码哈希 + JWT 校验依赖
+│   ├── security.py    #   Casdoor JWT/JWKS 校验 + RBAC 依赖
 │   ├── logging.py     #   structlog JSON 日志
 │   └── phoenix.py     #   OpenInference/OTel → Phoenix（可选旁路）
 ├── models/            # SQLAlchemy 模型（含 audit、chat、user）
@@ -54,7 +54,8 @@ app/
 ├── routers/           # API 路由（按领域拆分，全部 JWT 保护）
 ├── services/          # 业务逻辑 + 数据访问
 ├── repositories/      # （预留）数据访问层
-└── agent/             # AI Agent（LangGraph）
+└── agent/             # AI Agent runtime 适配与 LangGraph 回退实现
+    ├── runtime/       #   OpenClaw Responses API 适配器
     ├── graph.py       #   StateGraph 定义 + Postgres checkpointer 生命周期
     ├── tools.py       #   工具 schema + 读/写工具执行
     ├── skills.py      #   意图路由（关键词）+ 受限工具集
@@ -64,7 +65,16 @@ app/
 
 ---
 
-## AI Agent（LangGraph）
+## AI Agent runtime
+
+浏览器始终调用 FastAPI；后端通过 `AGENT_RUNTIME` 选择运行时，并保持相同的 SSE 契约、PostgreSQL 展示历史和审计。
+
+- `openclaw`：当前首选。后端通过私有容器网络调用 OpenClaw Responses API。会话用用户与 FilmOS session 共同派生的不可逆标识隔离。第一版只有文本对话，没有业务工具。
+- `langgraph`：临时回退路径，保留原有对话式录单与排产能力。
+
+OpenClaw 容器配置见 [../openclaw/README.md](../openclaw/README.md)。它的内部 SQLite 仅保存 Agent runtime 状态，不是业务数据库。
+
+## LangGraph 回退实现
 
 对话式录单与排产。要点：
 
@@ -73,7 +83,7 @@ app/
 - **状态持久化**：用 **Postgres** checkpointer（`AsyncPostgresSaver`）保存图状态，按 `session_id` 隔离。
   > 用 Postgres 而非 Redis：`langgraph-checkpoint-redis` 需要 Redis Stack（RediSearch），而项目用的是原版 `redis:7`；Postgres 已在运行且 LangGraph 原生支持。注意它用 psycopg（DSN 为 `postgresql://`，非 `postgresql+asyncpg://`）。
 - **审计**：每轮对话记录 prompt / 技能 / 工具 / token 消耗到 `agent_audit_logs`（成本管控 + 泄漏留痕）。
-- **LLM**：DeepSeek，经 langchain-openai 的 OpenAI 兼容接口。需要 `DEEPSEEK_API_KEY`。
+- **LLM**：通过 langchain-openai 调用 OpenAI-compatible 接口；默认配置为千问 `qwen3.7-plus`。
 - **Trace**：OpenInference 自动观测 LangChain/LangGraph，通过 OTLP/HTTP 发送到 Phoenix；由 `PHOENIX_ENABLED` 控制。
 
 会话历史存 `chat_messages` 表（供 UI 渲染），图执行状态存 checkpointer（供 interrupt 恢复）——两者分工。
@@ -120,8 +130,23 @@ python scripts/seed_demo.py [--reset]             # 灌入演示数据（仅测�
 |---|---|
 | `DATABASE_URL` | Postgres 连接串（`postgresql+asyncpg://…`） |
 | `REDIS_URL` | Redis 连接串 |
-| `AUTH_SECRET` | JWT 签名密钥（须与前端一致） |
-| `DEEPSEEK_API_KEY` | Agent 的 LLM key（空则 Agent 报错但不影响其余接口） |
+| `AUTH_PROVIDER` | `local` 或 `casdoor`；生产强制为 `casdoor` |
+| `AUTH_SECRET` | 仅本地开发 HS256 登录使用；生产业务 Token 不使用该密钥 |
+| `CASDOOR_ISSUER` | 外部 OIDC issuer，必须与 Token `iss` 完全一致 |
+| `CASDOOR_CLIENT_ID` | FilmOS OIDC client ID，同时作为 access token audience |
+| `CASDOOR_JWKS_URL` | FastAPI 通过私网读取的 Casdoor JWKS 地址 |
+| `CASDOOR_ORGANIZATION` | 允许的 Casdoor 组织；生产固定为 `filmos` |
+| `AGENT_RUNTIME` | `openclaw` 或 `langgraph`；代码默认回退为 `langgraph`，Compose 显式使用 `openclaw` |
+| `OPENCLAW_BASE_URL` | 私有 OpenClaw Gateway 地址 |
+| `OPENCLAW_GATEWAY_TOKEN` | 后端访问 Gateway 的共享 Token，不得下发前端 |
+| `OPENCLAW_AGENT_ID` | OpenClaw Agent ID，默认 `filmos-web` |
+| `LLM_API_KEY` | Agent 的模型 API Key（空则 Agent 报错但不影响其余接口） |
+| `LLM_BASE_URL` | OpenAI-compatible API 地址；默认千问国内 DashScope |
+| `LLM_MODEL` | 模型 ID；默认 `qwen3.7-plus` |
+| `LLM_VISION_MODEL` | JPG/PNG 订单识别模型；默认 `qwen3-vl-plus` |
+| `LLM_REQUEST_TIMEOUT_SECONDS` | 受控订单提取模型调用超时；默认 60 秒 |
+| `AGENT_IMAGE_MAX_BYTES` | 单张订单图片解码后的最大字节数；默认 5MB |
+| `CHAT_ATTACHMENT_DIR` | 聊天图片附件目录；容器中固定为 `/app/data/chat-attachments` 并挂载私有持久卷 |
 | `SENTRY_DSN` | 可选，错误追踪 |
 | `PHOENIX_ENABLED` | 是否启用 Agent Trace；后端默认 `false`，Compose 当前设为 `true` |
 | `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix 根地址，默认 `http://phoenix:6006` |

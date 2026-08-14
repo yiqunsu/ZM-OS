@@ -1,0 +1,56 @@
+{
+	admin 127.0.0.1:2019
+}
+
+{$APP_SITE_ADDRESS} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	@health path /healthz
+	handle @health {
+		respond "ok" 200
+	}
+
+	@nextauth path /api/auth/callback/* /api/auth/csrf /api/auth/error* /api/auth/providers /api/auth/session /api/auth/signin* /api/auth/signout* /api/auth/verify-request*
+	handle @nextauth {
+		reverse_proxy frontend:3000
+	}
+
+	@backend_api path /api /api/*
+	handle @backend_api {
+		reverse_proxy backend:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy frontend:3000
+	}
+}
+
+{$AUTH_SITE_ADDRESS} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	encode zstd gzip
+	reverse_proxy casdoor:8000
+}

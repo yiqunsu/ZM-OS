@@ -1,4 +1,5 @@
-import { getSession, signOut } from "next-auth/react"
+import { getSession } from "next-auth/react"
+import { federatedSignOut } from "@/lib/auth-client"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api"
 
@@ -19,7 +20,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   })
   if (res.status === 401) {
-    await signOut({ callbackUrl: "/login" })
+    await federatedSignOut()
     throw new ApiError(401, "登录已过期，请重新登录")
   }
   if (!res.ok) {
@@ -60,7 +61,7 @@ export async function postStream(path: string, body: unknown): Promise<Response>
     body: JSON.stringify(body),
   })
   if (res.status === 401) {
-    await signOut({ callbackUrl: "/login" })
+    await federatedSignOut()
     throw new ApiError(401, "登录已过期，请重新登录")
   }
   if (!res.ok) {

@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+
+  casdoor-db-init:
+    image: postgres:16
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      CASDOOR_DB: ${CASDOOR_DB}
+      CASDOOR_DB_USER: ${CASDOOR_DB_USER}
+      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD}
+    volumes:
+      - ../../local-auth/init-database.sh:/init-database.sh:ro
+    command: ["bash", "/init-database.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_test_data:

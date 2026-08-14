@@ -1,19 +1,26 @@
 import type { DefaultSession } from "next-auth";
 
+type FilmOSRole = "OWNER" | "OPERATOR";
+
 declare module "next-auth" {
   interface Session {
-    backendToken: string;
+    backendToken?: string;
+    error?: "RefreshTokenError";
     user: {
-      id: string;
-      role: string;
+      id?: string;
+      role?: FilmOSRole;
     } & DefaultSession["user"];
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
-    uid: string;
-    role: string;
-    backendToken: string;
+    uid?: string;
+    role?: FilmOSRole;
+    backendToken?: string;
+    accessTokenExpires?: number;
+    refreshToken?: string;
+    idToken?: string;
+    authError?: "RefreshTokenError";
   }
 }

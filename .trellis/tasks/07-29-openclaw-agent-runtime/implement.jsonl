@@ -1,0 +1,6 @@
+{"file":"meta/GROUND_TRUTH.md","reason":"Authoritative backend, PostgreSQL, Agent confirmation, and security boundaries."}
+{"file":"meta/ENGINEERING_RULES.md","reason":"Backend layering, API, secrets, logs, Docker, and transaction requirements."}
+{"file":"meta/TESTING.md","reason":"Required backend, frontend, migration, and Compose verification matrix."}
+{"file":".trellis/spec/backend/core/index.md","reason":"Backend package index and pre-development checklist."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The OpenClaw stream crosses container, runtime, FastAPI SSE, and frontend boundaries."}
+{"file":".trellis/tasks/07-29-openclaw-agent-runtime/design.md","reason":"Approved architecture, storage, session, failure, and rollback design."}

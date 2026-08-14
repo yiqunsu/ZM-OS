@@ -35,10 +35,12 @@ class AgentState(TypedDict):
 
 
 def _build_model() -> ChatOpenAI:
+    if not settings.LLM_API_KEY:
+        raise RuntimeError("LLM_API_KEY is not configured")
     return ChatOpenAI(
-        model=settings.DEEPSEEK_MODEL,
-        api_key=settings.DEEPSEEK_API_KEY,
-        base_url=settings.DEEPSEEK_BASE_URL,
+        model=settings.LLM_MODEL,
+        api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_BASE_URL,
         max_tokens=2048,
         temperature=0.3,
     )
@@ -49,18 +51,16 @@ async def _agent_node(state: AgentState) -> dict[str, Any]:
     context = await skills.load_context(skill)
     system = prompts.system_prompt() + "\n\n" + skill.task_prompt + context
 
-    # parallel_tool_calls=False asks the model for one call per turn, but DeepSeek
-    # ignores it and still emits parallel calls — so the real guard is _tools_node,
-    # which answers *every* tool_call. We keep the hint for providers that honor it.
+    # Request one call per turn when the provider supports the OpenAI-compatible
+    # hint. The real guard remains _tools_node, which answers every emitted call.
     model = _build_model().bind_tools(schemas_for(skill.allowed_tools), parallel_tool_calls=False)
     response = await model.ainvoke([SystemMessage(content=system), *state["messages"]])
     return {"messages": [response]}
 
 
 async def _tools_node(state: AgentState) -> dict[str, Any]:
-    # Answer EVERY tool_call on the message: DeepSeek emits parallel calls, and the
-    # OpenAI protocol requires one tool message per tool_call_id — leaving any
-    # unanswered makes the next model turn fail with "insufficient tool messages".
+    # The OpenAI-compatible protocol requires one tool message per tool_call_id;
+    # leaving any parallel call unanswered makes the next model turn fail.
     last = state["messages"][-1]
     out: list[ToolMessage] = []
     for tool_call in last.tool_calls:

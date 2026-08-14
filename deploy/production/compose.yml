@@ -1,0 +1,275 @@
+name: filmos-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16.10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - database
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 640m
+    cpus: 1.0
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: ../deploy/production/backend.Dockerfile
+    image: filmos-backend:production
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENVIRONMENT: production
+      AUTH_PROVIDER: casdoor
+      CASDOOR_ISSUER: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}
+      CASDOOR_JWKS_URL: http://casdoor:8000/.well-known/jwks
+      CASDOOR_ORGANIZATION: filmos
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AGENT_RUNTIME: ${AGENT_RUNTIME:-openclaw}
+      OPENCLAW_BASE_URL: http://openclaw:18789
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_AGENT_ID: filmos-web
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.7-plus}
+      CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
+      PHOENIX_ENABLED: "false"
+      SENTRY_DSN: ""
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+      casdoor:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+      - agent
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.5
+    logging: *default-logging
+
+  casdoor:
+    image: casbin/casdoor:3.125.0@sha256:d7658640aba370495e59dc1464756d2ae7ec66576203b9de0040e9cc37793607
+    restart: unless-stopped
+    init: true
+    environment:
+      RUNNING_IN_DOCKER: "true"
+    volumes:
+      - ../../.data/casdoor/app.conf:/conf/app.conf:ro
+      - ../../.data/casdoor/init_data.json:/init_data.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    cpus: 0.75
+    logging: *default-logging
+
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:2026.7.1-slim@sha256:6a31d44b2944e7adcd2b582bf6fb463111264ebca97a0201795b799135bd102c
+    restart: unless-stopped
+    init: true
+    environment:
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /workspace
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env.production}
+      OPENCLAW_DISABLE_BONJOUR: "1"
+      LLM_API_KEY: ${QWEN_API_KEY:?Set QWEN_API_KEY in .env.production}
+      LLM_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
+    command:
+      [
+        "sh",
+        "-lc",
+        "cp /etc/openclaw/openclaw.seed.json /home/node/.openclaw/openclaw.json && chmod 600 /home/node/.openclaw/openclaw.json && exec node openclaw.mjs gateway --bind lan --port 18789",
+      ]
+    volumes:
+      - ../../openclaw/config/openclaw.json:/etc/openclaw/openclaw.seed.json:ro
+      - ../../openclaw/workspace:/workspace:ro
+      - openclaw_state:/home/node/.openclaw
+    networks:
+      openclaw_egress:
+        gw_priority: 1
+      agent:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:18789/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 640m
+    cpus: 0.75
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deploy/production/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_CASDOOR_URL: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
+        NEXT_PUBLIC_CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}
+    image: filmos-frontend:production
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env.production}
+      NEXTAUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env.production}
+      AUTH_URL: ${NEXTAUTH_URL:?Set NEXTAUTH_URL in .env.production}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?Set NEXTAUTH_URL in .env.production}
+      AUTH_TRUST_HOST: "true"
+      AUTH_PROVIDER: casdoor
+      BACKEND_INTERNAL_URL: http://backend:8000
+      CASDOOR_ISSUER: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
+      CASDOOR_PUBLIC_URL: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
+      CASDOOR_INTERNAL_URL: http://casdoor:8000
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}
+      CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:?Set CASDOOR_CLIENT_SECRET in .env.production}
+      SENTRY_DSN: ""
+    depends_on:
+      backend:
+        condition: service_healthy
+      casdoor:
+        condition: service_healthy
+    networks:
+      - application
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/login').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    cpus: 1.0
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      APP_SITE_ADDRESS: ${APP_SITE_ADDRESS:?Set APP_SITE_ADDRESS in .env.production}
+      AUTH_SITE_ADDRESS: ${AUTH_SITE_ADDRESS:?Set AUTH_SITE_ADDRESS in .env.production}
+    ports:
+      - "${WEB_BIND_IP:-127.0.0.1}:80:80"
+      - "${WEB_BIND_IP:-127.0.0.1}:443:443"
+      - "${WEB_BIND_IP:-127.0.0.1}:443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+      casdoor:
+        condition: service_healthy
+    networks:
+      - application
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--output-document=/dev/null",
+          "http://127.0.0.1:2019/config/",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 96m
+    cpus: 0.5
+    logging: *default-logging
+
+networks:
+  application:
+  database:
+    internal: true
+  agent:
+    internal: true
+  openclaw_egress:
+
+volumes:
+  postgres_data:
+    name: filmos_postgres_data
+  caddy_data:
+    name: filmos_caddy_data
+  caddy_config:
+    name: filmos_caddy_config
+  openclaw_state:
+    name: filmos_openclaw_state
+  chat_attachments:
+    name: filmos_chat_attachments

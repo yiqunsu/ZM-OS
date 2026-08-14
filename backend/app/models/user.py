@@ -20,6 +20,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=generate_id)
     email: Mapped[str] = mapped_column(String, unique=True, index=True)
-    password_hash: Mapped[str]
+    external_subject: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str | None]
     role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole, name="user_role"), default=UserRole.OPERATOR)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

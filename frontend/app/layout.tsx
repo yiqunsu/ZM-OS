@@ -10,7 +10,7 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "订单管理系统",
+  title: "FilmOS · 智能排产工作台",
   description: "塑料薄膜工厂订单管理",
 };
 
@@ -32,7 +32,7 @@ export default function RootLayout({
         <AuthSessionProvider>
           <Sidebar />
           {/* 桌面端偏移左侧边栏，手机端底部留出导航栏空间 */}
-          <div className="md:ml-16 pb-16 md:pb-0 min-h-screen flex flex-col">
+          <div className="md:ml-60 pb-16 md:pb-0 min-h-screen flex flex-col">
             {children}
           </div>
         </AuthSessionProvider>

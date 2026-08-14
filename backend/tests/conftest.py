@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.database import get_db
 from app.core.security import CurrentUser, get_current_user
 from app.main import app
-from app.models import Base
+from app.models import Base, User, UserRole
 
 ADMIN_DSN = dict(user="filmos", password="filmos", database="filmos", host="localhost", port=5432)
 TEST_DB_URL = "postgresql+asyncpg://filmos:filmos@localhost:5432/filmos_test"
@@ -22,13 +22,23 @@ async def _ensure_test_db() -> None:
         await conn.close()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
 async def _prepare_schema():
     await _ensure_test_db()
     engine = create_async_engine(TEST_DB_URL)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        session.add(
+            User(
+                id="test-user",
+                email="test@filmos.local",
+                password_hash="test-only-not-a-real-password-hash",
+                role=UserRole.OWNER,
+            )
+        )
+        await session.commit()
     await engine.dispose()
     yield
 
@@ -55,7 +65,7 @@ async def client(db_session):
         yield db_session
 
     def _override_get_current_user():
-        return CurrentUser(id="test-user", email="test@filmos.local", role="OWNER")
+        return CurrentUser(id="test-user", email="test@filmos.local", role=UserRole.OWNER)
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user] = _override_get_current_user

@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Formula, Order, Product
-from app.models.order import OrderStatus
+from app.models import Customer, Formula, Order, Product
+from app.models.order import OrderStatus, order_number_sequence
 
 _LOAD_OPTS = (
     selectinload(Order.customer),
@@ -31,19 +31,22 @@ async def get_order(db: AsyncSession, order_id: str) -> Order:
 
 async def _generate_order_no(db: AsyncSession) -> str:
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    prefix = f"ORD-{today}"
-    count = await db.scalar(
-        select(func.count()).select_from(Order).where(Order.order_no.startswith(prefix))
-    )
-    return f"{prefix}-{(count or 0) + 1:03d}"
+    serial = await db.scalar(select(order_number_sequence.next_value()))
+    return f"ORD-{today}-{serial:03d}"
 
 
-async def _build_formula_snapshot(db: AsyncSession, formula_id: str | None) -> dict | None:
+async def _build_formula_snapshot(
+    db: AsyncSession,
+    formula_id: str | None,
+    product_id: str | None = None,
+) -> dict | None:
     if not formula_id:
         return None
     formula = await db.get(Formula, formula_id)
     if formula is None:
-        return None
+        raise HTTPException(400, "配方不存在")
+    if product_id is not None and formula.product_id != product_id:
+        raise HTTPException(400, "配方与订单产品不匹配")
     return {"name": formula.name, "specParams": formula.spec_params, "materials": formula.materials}
 
 
@@ -59,9 +62,17 @@ async def create_order(
 ) -> Order:
     if not customer_id or not product_id or quantity is None or not unit:
         raise HTTPException(400, "客户、产品、数量和单位为必填项")
+    if quantity <= 0:
+        raise HTTPException(400, "订单数量必须大于零")
+    if unit not in {"kg", "t"}:
+        raise HTTPException(400, "订单单位仅支持 kg 或 t")
+    if await db.get(Customer, customer_id) is None:
+        raise HTTPException(400, "客户不存在")
+    if await db.get(Product, product_id) is None:
+        raise HTTPException(400, "产品不存在")
 
     order_no = await _generate_order_no(db)
-    formula_snapshot = await _build_formula_snapshot(db, formula_id)
+    formula_snapshot = await _build_formula_snapshot(db, formula_id, product_id)
 
     order = Order(
         order_no=order_no,
@@ -86,8 +97,13 @@ async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) 
         raise HTTPException(404, "订单不存在")
 
     if "formula_id" in fields:
-        order.formula_snapshot = await _build_formula_snapshot(db, fields["formula_id"])
+        target_product_id = fields.get("product_id", order.product_id)
+        order.formula_snapshot = await _build_formula_snapshot(
+            db, fields["formula_id"], target_product_id
+        )
         order.formula_id = fields["formula_id"] or None
+    elif "product_id" in fields and order.formula_id:
+        await _build_formula_snapshot(db, order.formula_id, fields["product_id"])
     if "customer_id" in fields:
         order.customer_id = fields["customer_id"]
     if "product_id" in fields:

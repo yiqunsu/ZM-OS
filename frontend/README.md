@@ -7,7 +7,7 @@ Next.js（App Router）前端，是系统的 **UI 层**：渲染界面、处理�
 ## 职责边界
 
 - **UI 渲染**：订单列表、排产看板（拖拽）、基础数据管理、AI 助手对话。
-- **登录鉴权**：用 NextAuth（Credentials）对接后端 `/auth/login`，签发 JWT；中间件保护所有页面，未登录跳转 `/login`。
+- **登录鉴权**：生产环境用 Auth.js 对接 Casdoor OIDC，并在服务端刷新短期 access token；`proxy.ts` 保护页面，未登录跳转 `/login`。Credentials 只保留给本地开发。
 - **调用后端**：所有请求经 `lib/api.ts` 统一封装，自动带上 JWT；AI 对话用 SSE 流式接收。
 
 后端返回什么，前端就渲染什么——业务规则（状态流转、删除保护等）都在后端，前端不重复实现。
@@ -38,8 +38,8 @@ lib/
 ├── api.ts              #   API 客户端：统一 fetch + JWT + SSE（postStream）
 └── utils.ts
 
-auth.ts                 # NextAuth 配置（Credentials → 后端登录 → 签发 JWT）
-middleware.ts           # 路由保护（未登录重定向）
+auth.ts                 # Auth.js 配置（Casdoor OIDC + 服务端 Token 刷新）
+proxy.ts                # 路由保护 + OWNER 专属设置页保护
 ```
 
 ---
@@ -47,8 +47,10 @@ middleware.ts           # 路由保护（未登录重定向）
 ## 与后端的对接
 
 - **字段命名**：后端是 Python 的 snake_case（`order_no`、`spec_params`、`is_active`），前端类型和请求体都按 snake_case 对齐。
-- **鉴权**：`auth.ts` 里除了 NextAuth 自身的加密 session，还额外用共享的 `AUTH_SECRET` 签一个后端可校验的 JWT（HS256），`lib/api.ts` 把它放进 `Authorization` 头。
-- **API 地址**：由 `NEXT_PUBLIC_API_URL` 指定（默认指向后端 `/api`）。
+- **鉴权**：生产环境的 Auth.js 加密 Cookie 保存 Casdoor access/refresh token；浏览器 Session 只得到短期 access token、本地用户 ID、邮箱与角色。`lib/api.ts` 把短期 Token 放进 `Authorization` 头，FastAPI 通过 JWKS 验证并执行 RBAC。
+- **刷新与退出**：refresh token 和 OIDC client secret 不返回浏览器。刷新失败会清理登录状态；正常退出同时清理 Auth.js 与 Casdoor SSO 会话。
+- **权限展示**：OPERATOR 看不到基础数据入口且不能直接访问 `/settings`，但真正的写权限仍由 FastAPI 决定。
+- **API 地址**：由构建期变量 `NEXT_PUBLIC_API_URL` 指定。本地 Docker 镜像默认使用 `http://localhost:8000/api`，生产镜像默认使用同源 `/api`。
 
 ---
 
@@ -63,11 +65,20 @@ npm run build        # 生产构建（含 TypeScript 检查）
 
 通常直接用根目录的 `docker compose up -d` 一起跑，前端会自动连上后端容器。
 
+`NEXT_PUBLIC_*` 会在 Next.js 构建时写入浏览器 bundle。根 Compose 会把 `NEXT_PUBLIC_API_URL` 作为 build arg 传入；如需覆盖，在运行 Compose 前通过 shell 或仓库根目录 `.env` 设置，然后重新执行 `docker compose build frontend`。只修改容器的 runtime `env_file` 不会改变已经构建的前端地址。
+
 ### 环境变量（`frontend/.env.local`）
 
 | 变量 | 说明 |
 |---|---|
-| `AUTH_SECRET` / `NEXTAUTH_SECRET` | 与后端一致的 JWT 密钥 |
-| `NEXTAUTH_URL` | NextAuth 回调地址（本地 `http://localhost:3000`） |
-| `NEXT_PUBLIC_API_URL` | 后端 API 地址 |
+| `AUTH_PROVIDER` | 服务端 `local` 或 `casdoor`；生产固定 `casdoor` |
+| `NEXT_PUBLIC_AUTH_PROVIDER` | 构建登录页模式；生产固定 `casdoor` |
+| `AUTH_SECRET` / `NEXTAUTH_SECRET` | Auth.js Cookie 密钥；仅本地模式同时用于开发 JWT |
+| `NEXTAUTH_URL` | Auth.js 回调地址 |
+| `CASDOOR_ISSUER` / `CASDOOR_PUBLIC_URL` | 外部 Casdoor OIDC origin |
+| `CASDOOR_INTERNAL_URL` | Next.js 容器访问 Casdoor 的私网地址 |
+| `CASDOOR_CLIENT_ID` / `CASDOOR_CLIENT_SECRET` | OIDC 客户端凭证；secret 仅服务端可见 |
+| `NEXT_PUBLIC_CASDOOR_URL` | 浏览器联合退出所用 Casdoor 地址 |
+| `NEXT_PUBLIC_CASDOOR_CLIENT_ID` | 联合退出使用的公开 client ID |
+| `NEXT_PUBLIC_API_URL` | 构建期后端 API base，必须包含后端路由前缀 `/api` |
 | `NEXT_PUBLIC_SENTRY_DSN` | 可选，前端错误追踪 |

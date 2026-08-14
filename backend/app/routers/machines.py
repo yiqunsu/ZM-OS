@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_owner
 from app.schemas.machine import MachineCreate, MachineOut
 from app.services import machine_service
 
@@ -15,7 +15,12 @@ async def list_machines(db: AsyncSession = Depends(get_db)):
     return [machine_service.to_out(m) for m in machines]
 
 
-@router.post("", response_model=MachineOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=MachineOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_owner)],
+)
 async def create_machine(body: MachineCreate, db: AsyncSession = Depends(get_db)):
     machine = await machine_service.create_machine(
         db,
@@ -30,7 +35,7 @@ async def create_machine(body: MachineCreate, db: AsyncSession = Depends(get_db)
     return machine_service.to_out(machine)
 
 
-@router.put("/{machine_id}", response_model=MachineOut)
+@router.put("/{machine_id}", response_model=MachineOut, dependencies=[Depends(require_owner)])
 async def update_machine(machine_id: str, body: MachineCreate, db: AsyncSession = Depends(get_db)):
     machine = await machine_service.update_machine(
         db,
@@ -46,7 +51,11 @@ async def update_machine(machine_id: str, body: MachineCreate, db: AsyncSession 
     return machine_service.to_out(machine)
 
 
-@router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{machine_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_owner)],
+)
 async def delete_machine(machine_id: str, db: AsyncSession = Depends(get_db)):
     await machine_service.delete_machine(db, machine_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

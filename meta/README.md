@@ -10,6 +10,7 @@
 | [ENGINEERING_RULES.md](ENGINEERING_RULES.md) | 前后端、数据库、安全和可维护性规范 | 修改任何代码前按涉及范围阅读 |
 | [TESTING.md](TESTING.md) | 最低验证要求和常用命令 | 开始实现及交付前 |
 | [OBSERVABILITY.md](OBSERVABILITY.md) | 日志、Sentry、Phoenix 与业务审计的职责边界 | 修改可观测性、追踪或部署配置前 |
+| [TRELLIS.md](TRELLIS.md) | Trellis 目录、事实源映射、任务与升级约定 | 使用或维护 Trellis 工作流前 |
 | [decisions/](decisions/) | 重要决策的背景、选择和后果 | 改变架构或长期约定前 |
 
 ## 规则强度

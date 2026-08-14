@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.order import OrderStatus
 from app.schemas.customer import CustomerRef
@@ -10,11 +11,11 @@ from app.schemas.production import TaskRef
 
 
 class OrderCreate(BaseModel):
-    customer_id: str
-    product_id: str
-    spec_params: dict[str, str] = {}
-    quantity: float
-    unit: str
+    customer_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    spec_params: dict[str, str] = Field(default_factory=dict)
+    quantity: float = Field(gt=0)
+    unit: Literal["kg", "t"]
     formula_id: str | None = None
     extra_notes: str | None = None
 
@@ -23,8 +24,8 @@ class OrderUpdate(BaseModel):
     customer_id: str | None = None
     product_id: str | None = None
     spec_params: dict[str, str] | None = None
-    quantity: float | None = None
-    unit: str | None = None
+    quantity: float | None = Field(default=None, gt=0)
+    unit: Literal["kg", "t"] | None = None
     formula_id: str | None = None
     extra_notes: str | None = None
     status: OrderStatus | None = None
