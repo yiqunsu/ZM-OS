@@ -60,6 +60,31 @@ async def create_order(
     formula_id: str | None,
     extra_notes: str | None,
 ) -> Order:
+    order = await create_order_record(
+        db,
+        customer_id,
+        product_id,
+        spec_params,
+        quantity,
+        unit,
+        formula_id,
+        extra_notes,
+    )
+    await db.commit()
+    return await _get_loaded(db, order.id)
+
+
+async def create_order_record(
+    db: AsyncSession,
+    customer_id: str,
+    product_id: str,
+    spec_params: dict,
+    quantity: float,
+    unit: str,
+    formula_id: str | None,
+    extra_notes: str | None,
+) -> Order:
+    """Build and flush an order without committing the surrounding use case."""
     if not customer_id or not product_id or quantity is None or not unit:
         raise HTTPException(400, "客户、产品、数量和单位为必填项")
     if quantity <= 0:
@@ -87,14 +112,18 @@ async def create_order(
         status=OrderStatus.PENDING,
     )
     db.add(order)
-    await db.commit()
-    return await _get_loaded(db, order.id)
+    await db.flush()
+    return order
 
 
 async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) -> Order:
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "订单不存在")
+    if order.task_id is not None and fields:
+        raise HTTPException(409, "订单已进入排产，请先通过生产看板将订单退回待排单")
+    if "status" in fields and fields["status"] != OrderStatus.PENDING:
+        raise HTTPException(400, "订单生产状态只能由生产任务流转更新")
 
     if "formula_id" in fields:
         target_product_id = fields.get("product_id", order.product_id)
@@ -130,6 +159,8 @@ async def delete_order(db: AsyncSession, order_id: str) -> None:
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "订单不存在")
+    if order.task_id is not None:
+        raise HTTPException(409, "订单已进入排产，请先通过生产看板将订单退回待排单")
     await db.delete(order)
     await db.commit()
 

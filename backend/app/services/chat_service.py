@@ -72,10 +72,20 @@ async def get_history(db: AsyncSession, session_id: str, user_id: str) -> list[C
     return list(result.scalars().all())
 
 
-async def require_session(db: AsyncSession, session_id: str, user_id: str) -> ChatSession:
-    result = await db.execute(
-        select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+async def require_session(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str,
+    *,
+    for_update: bool = False,
+) -> ChatSession:
+    statement = select(ChatSession).where(
+        ChatSession.id == session_id,
+        ChatSession.user_id == user_id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await db.execute(statement)
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(404, "Session 不存在")
@@ -102,7 +112,7 @@ async def get_pending(
 
 
 async def clear_workspace(db: AsyncSession, session_id: str, user_id: str) -> None:
-    session = await require_session(db, session_id, user_id)
+    session = await require_session(db, session_id, user_id, for_update=True)
     session.active_workspace = None
     session.workspace_state = None
     await db.commit()
@@ -114,7 +124,7 @@ async def save_order_workspace_draft(
     user_id: str,
     draft: dict,
 ) -> ChatSession:
-    session = await require_session(db, session_id, user_id)
+    session = await require_session(db, session_id, user_id, for_update=True)
     session.active_workspace = "order_form"
     session.workspace_state = {"order_draft": draft}
     await db.commit()

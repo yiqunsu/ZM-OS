@@ -1,6 +1,7 @@
 """Deterministic, explainable scheduling draft generation and atomic application."""
 
-import re
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,27 +24,20 @@ from app.models import (
 )
 from app.models.order import OrderStatus
 from app.models.production import TaskStatus
+from app.services.production_rules import (
+    OrderProductionProfile as OrderInfo,
+)
+from app.services.production_rules import (
+    ProductionSignature,
+    validate_machine_batch,
+)
+from app.services.production_rules import (
+    order_profile as _order_info,
+)
 
-_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
-_WIDTH_KEYS = {"宽度", "width", "幅宽"}
-_THICKNESS_KEYS = {"厚度", "thickness", "厚"}
-_PATTERN_KEYS = {"花纹", "pattern", "纹路"}
-
-
-@dataclass(frozen=True, slots=True)
-class ProductionSignature:
-    material: str
-    category_id: str
-    category_name: str
-    thickness: str
-    pattern: str
-
-
-@dataclass(slots=True)
-class OrderInfo:
-    order: Order
-    width: float | None
-    signature: ProductionSignature
+_PENDING_SET_KEY = "__pending_order_set__"
+_ACTIVE_MACHINE_SET_KEY = "__active_machine_set__"
+_MACHINE_KEY_PREFIX = "machine:"
 
 
 @dataclass(slots=True)
@@ -51,66 +45,9 @@ class MachineState:
     machine: Machine
     category_ids: set[str]
     pattern_names: set[str]
-    load: int
+    load_kg: float
     last_signature: ProductionSignature | None
     last_width: float | None
-
-
-def _normalized_key(value: str) -> str:
-    return value.strip().casefold().replace(" ", "")
-
-
-def _spec_value(spec_params: dict[str, Any], aliases: set[str]) -> str:
-    normalized_aliases = {_normalized_key(alias) for alias in aliases}
-    for key, value in (spec_params or {}).items():
-        if _normalized_key(str(key)) in normalized_aliases and value is not None:
-            return str(value).strip()
-    return ""
-
-
-def _number(value: str) -> float | None:
-    match = _NUMBER_RE.search(value.replace(",", ""))
-    if match is None:
-        return None
-    try:
-        parsed = float(match.group())
-    except ValueError:
-        return None
-    return parsed if parsed > 0 else None
-
-
-def _signature(order: Order) -> ProductionSignature:
-    snapshot = order.formula_snapshot or {}
-    material = str(order.formula_id or snapshot.get("materials") or "未指定配方").strip()
-    return ProductionSignature(
-        material=material,
-        category_id=order.product.category_id,
-        category_name=order.product.category.name,
-        thickness=_spec_value(order.spec_params, _THICKNESS_KEYS) or "未指定厚度",
-        pattern=_spec_value(order.spec_params, _PATTERN_KEYS),
-    )
-
-
-def _order_info(order: Order) -> OrderInfo:
-    return OrderInfo(
-        order=order,
-        width=_number(_spec_value(order.spec_params, _WIDTH_KEYS)),
-        signature=_signature(order),
-    )
-
-
-def _same_signature(left: ProductionSignature, right: ProductionSignature) -> bool:
-    return (
-        left.material,
-        left.category_id,
-        left.thickness,
-        left.pattern.casefold(),
-    ) == (
-        right.material,
-        right.category_id,
-        right.thickness,
-        right.pattern.casefold(),
-    )
 
 
 def _machine_compatible(state: MachineState, info: OrderInfo) -> bool:
@@ -124,38 +61,53 @@ def _changeover_key(
     state: MachineState,
     signature: ProductionSignature,
     total_width: float,
-) -> tuple[int, int, int, int, int, int, str, str]:
+    batch_load_kg: float,
+) -> tuple[int, int, int, int, int, float, float, str, str]:
     previous = state.last_signature
+    unused_ratio = (state.machine.max_width - total_width) / state.machine.max_width
     return (
         int(previous is not None and previous.material != signature.material),
         int(previous is not None and previous.category_id != signature.category_id),
         int(previous is not None and previous.thickness != signature.thickness),
         int(previous is not None and previous.pattern.casefold() != signature.pattern.casefold()),
         int(state.last_width is not None and state.last_width != total_width),
-        state.load,
+        round(unused_ratio, 6),
+        state.load_kg + batch_load_kg,
         state.machine.name,
         state.machine.id,
     )
 
 
-def _reason(state: MachineState, signature: ProductionSignature, order_count: int) -> str:
+def _reason(
+    state: MachineState,
+    signature: ProductionSignature,
+    order_count: int,
+    total_width: float,
+) -> str:
     previous = state.last_signature
     if previous is None:
         prefix = "机器当前无待生产任务"
     else:
         unchanged: list[str] = []
-        if previous.material == signature.material:
+        if signature.material and previous.material == signature.material:
             unchanged.append("配方/材料")
         if previous.category_id == signature.category_id:
             unchanged.append("产品大类")
-        if previous.thickness == signature.thickness:
+        if signature.thickness and previous.thickness == signature.thickness:
             unchanged.append("厚度")
-        if previous.pattern.casefold() == signature.pattern.casefold():
+        if signature.pattern and previous.pattern.casefold() == signature.pattern.casefold():
             unchanged.append("花纹")
         prefix = f"优先保持{'、'.join(unchanged)}不变" if unchanged else "在可用机器中换产代价最低"
+    utilization = total_width / state.machine.max_width * 100
     if order_count > 1:
-        return f"{prefix}；{order_count} 张订单生产签名一致，合并生产以减少换产"
-    return f"{prefix}；机器类别、宽度和花纹能力均匹配"
+        detail = f"{order_count} 张订单生产签名一致，合并生产以减少换产"
+    else:
+        detail = "机器类别、宽度和花纹能力均匹配"
+    return f"{prefix}；{detail}；幅宽利用率 {utilization:.1f}%"
+
+
+def _quantity_kg(order: Order) -> float:
+    return float(order.quantity) * (1000 if order.unit == "t" else 1)
 
 
 def _last_task_signature(machine: Machine) -> tuple[ProductionSignature | None, float | None]:
@@ -196,6 +148,7 @@ async def _load_machines(db: AsyncSession) -> list[Machine]:
             .selectinload(Order.product)
             .selectinload(Product.category),
         )
+        .execution_options(populate_existing=True)
     )
     return list(result.scalars().unique().all())
 
@@ -209,7 +162,12 @@ def _machine_states(machines: list[Machine]) -> list[MachineState]:
                 machine=machine,
                 category_ids={link.category_id for link in machine.category_links},
                 pattern_names={link.pattern.name.strip().casefold() for link in machine.pattern_links},
-                load=sum(task.status != TaskStatus.DONE for task in machine.tasks),
+                load_kg=sum(
+                    _quantity_kg(order)
+                    for task in machine.tasks
+                    if task.status != TaskStatus.DONE
+                    for order in task.orders
+                ),
                 last_signature=signature,
                 last_width=width,
             )
@@ -247,6 +205,9 @@ def _select_batch(
     scan.  If the earliest anchor prevents the batch from reaching ``min_width``,
     every later order is tried as the anchor so a feasible combination is not lost.
     """
+    best_batch: list[OrderInfo] = []
+    best_width = 0.0
+    best_indexes: tuple[int, ...] = ()
     for anchor in remaining:
         assert anchor.width is not None
         if anchor.width > state.machine.max_width:
@@ -263,8 +224,16 @@ def _select_batch(
         if batch and total_width >= state.machine.min_width:
             selected_ids = {info.order.id for info in batch}
             ordered_batch = [info for info in remaining if info.order.id in selected_ids]
-            return ordered_batch, total_width
-    return [], 0.0
+            indexes = tuple(
+                index for index, info in enumerate(remaining) if info.order.id in selected_ids
+            )
+            if total_width > best_width or (
+                total_width == best_width and (not best_indexes or indexes < best_indexes)
+            ):
+                best_batch = ordered_batch
+                best_width = total_width
+                best_indexes = indexes
+    return best_batch, best_width
 
 
 def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dict], list[dict]]:
@@ -284,12 +253,13 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
         else:
             schedulable.append(info)
 
-    groups: dict[ProductionSignature, list[OrderInfo]] = defaultdict(list)
+    groups: dict[tuple[ProductionSignature, str | None], list[OrderInfo]] = defaultdict(list)
     for info in schedulable:
-        groups[info.signature].append(info)
+        discriminator = None if info.signature.complete_for_merge else info.order.id
+        groups[(info.signature, discriminator)].append(info)
 
     tasks: list[dict] = []
-    for signature, group in groups.items():
+    for (signature, _discriminator), group in groups.items():
         remaining = list(group)
         while remaining:
             candidates: list[tuple[tuple[Any, ...], MachineState, list[OrderInfo], float]] = []
@@ -298,8 +268,19 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                     continue
                 batch, total_width = _select_batch(remaining, state)
                 if batch:
+                    batch_load_kg = sum(_quantity_kg(info.order) for info in batch)
                     candidates.append(
-                        (_changeover_key(state, signature, total_width), state, batch, total_width)
+                        (
+                            _changeover_key(
+                                state,
+                                signature,
+                                total_width,
+                                batch_load_kg,
+                            ),
+                            state,
+                            batch,
+                            total_width,
+                        )
                     )
 
             if not candidates:
@@ -314,7 +295,8 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                 break
 
             _, state, batch, total_width = min(candidates, key=lambda item: item[0])
-            reason = _reason(state, signature, len(batch))
+            batch_load_kg = sum(_quantity_kg(info.order) for info in batch)
+            reason = _reason(state, signature, len(batch), total_width)
             tasks.append(
                 {
                     "machine_id": state.machine.id,
@@ -322,16 +304,70 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                     "order_ids": [info.order.id for info in batch],
                     "order_nos": [info.order.order_no for info in batch],
                     "total_width": total_width,
+                    "width_utilization": round(total_width / state.machine.max_width, 4),
+                    "total_quantity_kg": batch_load_kg,
                     "reason": reason,
                 }
             )
-            state.load += 1
+            state.load_kg += batch_load_kg
             state.last_signature = signature
             state.last_width = total_width
             selected_order_ids = {info.order.id for info in batch}
             remaining = [info for info in remaining if info.order.id not in selected_order_ids]
 
     return tasks, unassigned
+
+
+def _stable_hash(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _machine_fingerprint(machine: Machine) -> str:
+    active_tasks = sorted(
+        (task for task in machine.tasks if task.status != TaskStatus.DONE),
+        key=lambda task: (task.position, task.id),
+    )
+    return _stable_hash(
+        {
+            "active": machine.is_active,
+            "min_width": machine.min_width,
+            "max_width": machine.max_width,
+            "categories": sorted(link.category_id for link in machine.category_links),
+            "patterns": sorted(link.pattern_id for link in machine.pattern_links),
+            "queue": [
+                {
+                    "id": task.id,
+                    "position": task.position,
+                    "status": task.status.value,
+                    "updated_at": task.updated_at.isoformat(),
+                    "orders": sorted(
+                        (order.id, order.updated_at.isoformat()) for order in task.orders
+                    ),
+                }
+                for task in active_tasks
+            ],
+        }
+    )
+
+
+def _input_fingerprint(orders: list[Order], machines: list[Machine]) -> dict[str, str]:
+    fingerprint = {order.id: order.updated_at.isoformat() for order in orders}
+    fingerprint[_PENDING_SET_KEY] = _stable_hash(sorted(order.id for order in orders))
+    fingerprint[_ACTIVE_MACHINE_SET_KEY] = _stable_hash(sorted(machine.id for machine in machines))
+    fingerprint.update(
+        {
+            f"{_MACHINE_KEY_PREFIX}{machine.id}": _machine_fingerprint(machine)
+            for machine in machines
+        }
+    )
+    return fingerprint
 
 
 async def create_schedule_plan(
@@ -342,7 +378,7 @@ async def create_schedule_plan(
     orders = await _load_orders(db)
     machines = await _load_machines(db)
     tasks, unassigned = _build_tasks(orders, machines)
-    fingerprint = {order.id: order.updated_at.isoformat() for order in orders}
+    fingerprint = _input_fingerprint(orders, machines)
     plan = SchedulePlan(
         session_id=session_id,
         created_by_id=user_id,
@@ -390,24 +426,7 @@ def _validate_task(
     if any(order is None for order in orders):
         raise HTTPException(409, "排产方案引用了不存在的订单")
     typed_orders = [order for order in orders if order is not None]
-    infos = [_order_info(order) for order in typed_orders]
-    if any(info.width is None for info in infos):
-        raise HTTPException(409, "排产方案中的订单缺少宽度")
-    if any(not _same_signature(infos[0].signature, info.signature) for info in infos[1:]):
-        raise HTTPException(409, "排产方案中的合并订单生产签名已不一致")
-    category_ids = {link.category_id for link in machine.category_links}
-    if infos[0].signature.category_id not in category_ids:
-        raise HTTPException(409, f"排产方案已过期：机器“{machine.name}”不支持该产品大类")
-    pattern = infos[0].signature.pattern.casefold()
-    pattern_names = {link.pattern.name.strip().casefold() for link in machine.pattern_links}
-    if pattern and pattern not in pattern_names:
-        raise HTTPException(409, f"排产方案已过期：机器“{machine.name}”不支持该花纹")
-    total_width = sum(info.width or 0 for info in infos)
-    if total_width < machine.min_width or total_width > machine.max_width:
-        raise HTTPException(
-            409,
-            f"排产方案已过期：合并宽度 {total_width:g}mm 不在机器“{machine.name}”范围内",
-        )
+    validate_machine_batch(machine, typed_orders)
     return typed_orders
 
 
@@ -433,16 +452,49 @@ async def apply_schedule_plan(
     machine_ids = {str(task.get("machine_id") or "") for task in plan.tasks}
     machine_result = await db.execute(
         select(Machine)
-        .where(Machine.id.in_(machine_ids))
+        .order_by(Machine.id)
         .with_for_update()
         .options(
-            selectinload(Machine.category_links),
+            selectinload(Machine.category_links).selectinload(MachineCategory.category),
             selectinload(Machine.pattern_links).selectinload(MachinePattern.pattern),
+            selectinload(Machine.tasks)
+            .selectinload(ProductionTask.orders)
+            .selectinload(Order.product)
+            .selectinload(Product.category),
         )
+        .execution_options(populate_existing=True)
     )
     machines = {machine.id: machine for machine in machine_result.scalars().unique().all()}
-    if len(machines) != len(machine_ids):
+    if not machine_ids.issubset(machines):
         raise HTTPException(409, "排产方案中的机器已不存在")
+
+    active_machines = [machine for machine in machines.values() if machine.is_active]
+    expected_machine_set = plan.input_fingerprint.get(_ACTIVE_MACHINE_SET_KEY)
+    if expected_machine_set and expected_machine_set != _stable_hash(
+        sorted(machine.id for machine in active_machines)
+    ):
+        raise HTTPException(409, "排产方案已过期：可用机器集合已发生变化，请重新生成方案")
+    for machine in active_machines:
+        expected = plan.input_fingerprint.get(f"{_MACHINE_KEY_PREFIX}{machine.id}")
+        if expected and expected != _machine_fingerprint(machine):
+            raise HTTPException(
+                409,
+                f"排产方案已过期：机器“{machine.name}”的能力或任务队列已变化",
+            )
+
+    current_pending_ids = list(
+        (
+            await db.execute(
+                select(Order.id)
+                .where(Order.status == OrderStatus.PENDING, Order.task_id.is_(None))
+                .order_by(Order.id)
+                .with_for_update()
+            )
+        ).scalars()
+    )
+    expected_pending_set = plan.input_fingerprint.get(_PENDING_SET_KEY)
+    if expected_pending_set and expected_pending_set != _stable_hash(current_pending_ids):
+        raise HTTPException(409, "排产方案已过期：待排订单集合已发生变化，请重新生成方案")
 
     order_result = await db.execute(
         select(Order)
@@ -486,7 +538,7 @@ async def apply_schedule_plan(
         task = ProductionTask(
             machine_id=machine.id,
             position=next_positions[machine.id],
-            status=TaskStatus.PRODUCING,
+            status=TaskStatus.WAITING,
             notes=f"智能排产方案 {plan.id}",
         )
         next_positions[machine.id] += 1

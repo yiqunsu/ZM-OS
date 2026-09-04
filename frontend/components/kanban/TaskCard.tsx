@@ -49,7 +49,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 /* ── Draggable row for a single order inside a task ── */
-function OrderRow({ order, fromTaskId }: { order: KanbanOrder; fromTaskId: string }) {
+function OrderRow({
+  order,
+  fromTaskId,
+  disabled,
+}: {
+  order: KanbanOrder;
+  fromTaskId: string;
+  disabled: boolean;
+}) {
   const [detailOpen,    setDetailOpen]    = useState(false);
   const [fullOrder,     setFullOrder]     = useState<FullOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -57,6 +65,7 @@ function OrderRow({ order, fromTaskId }: { order: KanbanOrder; fromTaskId: strin
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id:   order.id,
     data: { type: "task-order", orderId: order.id, fromTaskId },
+    disabled,
   });
 
   async function openDetail(e: React.MouseEvent) {
@@ -81,8 +90,10 @@ function OrderRow({ order, fromTaskId }: { order: KanbanOrder; fromTaskId: strin
         <div
           {...attributes}
           {...listeners}
-          className="mt-1 p-0.5 shrink-0 cursor-grab text-slate-300 hover:text-slate-500 transition-colors"
-          title="拖出可拆分"
+          className={`mt-1 p-0.5 shrink-0 text-slate-300 transition-colors ${
+            disabled ? "cursor-not-allowed opacity-40" : "cursor-grab hover:text-slate-500"
+          }`}
+          title={disabled ? "生产中的任务不能再拆分" : "拖出可拆分"}
         >
           <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
             <circle cx="5"  cy="3.5" r="1.3" />
@@ -215,12 +226,13 @@ export default function TaskCard({
   } = useSortable({
     id:   task.id,
     data: { type: "task", machineId: task.machine_id },
-    disabled: overlay,
+    disabled: overlay || task.status !== "WAITING",
   });
 
   /* Detect when a pending-order or task-order is being dragged over this card */
   const { active, over } = useDndContext();
   const isOrderOverMe = !overlay &&
+    task.status === "WAITING" &&
     over?.id === task.id &&
     (active?.data.current?.type === "order" ||
      (active?.data.current?.type === "task-order" && active?.data.current?.fromTaskId !== task.id));
@@ -258,8 +270,14 @@ export default function TaskCard({
           <div
             {...attributes}
             {...listeners}
-            className={`p-1 rounded text-slate-300 hover:text-slate-500 transition-colors shrink-0 ${overlay ? "cursor-grabbing" : "cursor-grab"}`}
-            title="拖拽整个任务"
+            className={`p-1 rounded text-slate-300 transition-colors shrink-0 ${
+              overlay
+                ? "cursor-grabbing"
+                : task.status === "WAITING"
+                  ? "cursor-grab hover:text-slate-500"
+                  : "cursor-not-allowed opacity-40"
+            }`}
+            title={task.status === "WAITING" ? "拖拽整个任务" : "生产中的任务不能移动"}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5h16.5M3.75 12h16.5M3.75 19h16.5" />
@@ -280,7 +298,7 @@ export default function TaskCard({
           {/* Add order button */}
           <button
             onClick={() => setAddOrderOpen(true)}
-            disabled={pendingOrders.length === 0}
+            disabled={pendingOrders.length === 0 || task.status !== "WAITING"}
             className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 transition-colors"
             title="添加订单（合并生产）"
           >
@@ -292,8 +310,9 @@ export default function TaskCard({
           {/* Delete button */}
           <button
             onClick={() => setDeleteOpen(true)}
-            className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-            title="删除任务（订单退回待排单）"
+            disabled={task.status !== "WAITING"}
+            className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
+            title={task.status === "WAITING" ? "删除任务（订单退回待排单）" : "生产中的任务不能删除"}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -304,7 +323,12 @@ export default function TaskCard({
         {/* Orders list — each row is independently draggable */}
         <div className="divide-y divide-slate-50">
           {task.orders.map((order) => (
-            <OrderRow key={order.id} order={order} fromTaskId={task.id} />
+            <OrderRow
+              key={order.id}
+              order={order}
+              fromTaskId={task.id}
+              disabled={task.status !== "WAITING"}
+            />
           ))}
         </div>
 

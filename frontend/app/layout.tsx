@@ -1,13 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 import AuthSessionProvider from "@/components/AuthSessionProvider";
 import "./globals.css";
-
-const geist = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "FilmOS · 智能排产工作台",
@@ -27,14 +22,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className={`${geist.variable} h-full`}>
+    <html lang="zh-CN" className="h-full">
       <body className="min-h-full bg-slate-50 text-slate-800 antialiased">
         <AuthSessionProvider>
           <Sidebar />
-          {/* 桌面端偏移左侧边栏，手机端底部留出导航栏空间 */}
-          <div className="md:ml-60 pb-16 md:pb-0 min-h-screen flex flex-col">
-            {children}
-          </div>
+          <AppShell>{children}</AppShell>
         </AuthSessionProvider>
       </body>
     </html>

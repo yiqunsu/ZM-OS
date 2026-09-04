@@ -3,13 +3,15 @@
 import { useDroppable } from "@dnd-kit/core";
 import { useDndContext } from "@dnd-kit/core";
 import OrderCard from "./OrderCard";
-import type { KanbanOrder } from "./types";
+import type { KanbanMachine, KanbanOrder } from "./types";
 
 interface Props {
   orders: KanbanOrder[];
+  machines: KanbanMachine[];
+  onCreateTask: (machineId: string, orderId: string) => void;
 }
 
-export default function PendingColumn({ orders }: Props) {
+export default function PendingColumn({ orders, machines, onCreateTask }: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id:   "pending-column",
     data: { type: "pending-column" },
@@ -60,7 +62,28 @@ export default function PendingColumn({ orders }: Props) {
           </div>
         ) : (
           <>
-            {orders.map((order) => <OrderCard key={order.id} order={order} />)}
+            {orders.map((order) => (
+              <div key={order.id} className="space-y-2">
+                <OrderCard order={order} />
+                <label className="block md:hidden">
+                  <span className="sr-only">将 {order.order_no} 排到机器</span>
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      if (event.target.value) onCreateTask(event.target.value, order.id);
+                    }}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600"
+                  >
+                    <option value="">选择机器排单…</option>
+                    {machines.map((machine) => (
+                      <option key={machine.id} value={machine.id}>
+                        {machine.name}（{machine.min_width}–{machine.max_width}mm）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ))}
             {isTaskOrderOver && (
               <div className="py-3 rounded-xl border-2 border-dashed border-orange-300 bg-orange-50 text-center">
                 <p className="text-xs text-orange-500 font-medium">松开拆分回待排单</p>

@@ -462,7 +462,10 @@ export default function ProductTab() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-slate-400">加载中…</div>;

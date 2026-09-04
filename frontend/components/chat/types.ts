@@ -76,6 +76,8 @@ export interface ScheduleTask {
   order_ids: string[];
   order_nos: string[];
   total_width: number;
+  width_utilization?: number;
+  total_quantity_kg?: number;
   reason: string;
 }
 

@@ -21,6 +21,7 @@ from app.models import (
     SchedulePlanStatus,
 )
 from app.models.order import OrderStatus
+from app.models.production import TaskStatus
 from app.services import schedule_service
 
 
@@ -201,6 +202,81 @@ async def test_schedule_tries_later_combination_when_earliest_cannot_reach_minim
     assert [item["order_id"] for item in plan.unassigned] == [orders[0].id]
 
 
+async def test_schedule_prefers_better_width_utilization(db_session):
+    session, _wide_machine, orders = await _setup_schedulable(
+        db_session,
+        widths=(800,),
+        max_width=1200,
+    )
+    product = await db_session.get(Product, orders[0].product_id)
+    narrow_machine = Machine(
+        name="高利用率窄机",
+        is_active=True,
+        min_width=100,
+        max_width=800,
+    )
+    db_session.add(narrow_machine)
+    await db_session.flush()
+    db_session.add(
+        MachineCategory(
+            machine_id=narrow_machine.id,
+            category_id=product.category_id,
+        )
+    )
+    await db_session.commit()
+
+    plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
+
+    assert plan.tasks[0]["machine_id"] == narrow_machine.id
+    assert plan.tasks[0]["width_utilization"] == 1
+    assert "幅宽利用率 100.0%" in plan.tasks[0]["reason"]
+
+
+async def test_schedule_balances_actual_order_weight_not_task_count(db_session):
+    session, loaded_machine, orders = await _setup_schedulable(
+        db_session,
+        widths=(500,),
+    )
+    product = await db_session.get(Product, orders[0].product_id)
+    idle_machine = Machine(
+        name="空闲机",
+        is_active=True,
+        min_width=100,
+        max_width=1200,
+    )
+    db_session.add(idle_machine)
+    await db_session.flush()
+    db_session.add(
+        MachineCategory(machine_id=idle_machine.id, category_id=product.category_id)
+    )
+    queued_task = ProductionTask(
+        machine_id=loaded_machine.id,
+        position=1,
+        status=TaskStatus.WAITING,
+    )
+    db_session.add(queued_task)
+    await db_session.flush()
+    queued_order = Order(
+        order_no="ORD-QUEUED-HEAVY",
+        customer_id=orders[0].customer_id,
+        product_id=orders[0].product_id,
+        formula_id=orders[0].formula_id,
+        formula_snapshot=orders[0].formula_snapshot,
+        spec_params={"厚度": "50μm", "宽度": "500mm"},
+        quantity=2,
+        unit="t",
+        status=OrderStatus.PRODUCING,
+        task_id=queued_task.id,
+    )
+    db_session.add(queued_order)
+    await db_session.commit()
+
+    plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
+
+    assert plan.tasks[0]["machine_id"] == idle_machine.id
+    assert plan.tasks[0]["total_quantity_kg"] == 100
+
+
 async def test_apply_schedule_plan_creates_all_tasks_and_updates_orders(db_session):
     session, _machine, orders = await _setup_schedulable(db_session)
     plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
@@ -289,6 +365,60 @@ async def test_apply_rejects_stale_order_without_creating_tasks(db_session):
         await schedule_service.apply_schedule_plan(db_session, plan.id, "test-user")
     await db_session.rollback()
     assert await db_session.scalar(select(func.count()).select_from(ProductionTask)) == 0
+
+
+async def test_apply_rejects_when_pending_order_set_changes(db_session):
+    session, _machine, orders = await _setup_schedulable(db_session)
+    plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
+    db_session.add(
+        Order(
+            order_no="ORD-NEW-AFTER-DRAFT",
+            customer_id=orders[0].customer_id,
+            product_id=orders[0].product_id,
+            formula_id=orders[0].formula_id,
+            formula_snapshot=orders[0].formula_snapshot,
+            spec_params={"厚度": "50μm", "宽度": "300mm"},
+            quantity=100,
+            unit="kg",
+            status=OrderStatus.PENDING,
+        )
+    )
+    await db_session.commit()
+
+    with pytest.raises(HTTPException, match="待排订单集合"):
+        await schedule_service.apply_schedule_plan(db_session, plan.id, "test-user")
+    await db_session.rollback()
+
+
+async def test_apply_rejects_when_machine_queue_changes(db_session):
+    session, machine, orders = await _setup_schedulable(db_session)
+    plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
+    queued_task = ProductionTask(
+        machine_id=machine.id,
+        position=1,
+        status=TaskStatus.WAITING,
+    )
+    db_session.add(queued_task)
+    await db_session.flush()
+    db_session.add(
+        Order(
+            order_no="ORD-QUEUE-CHANGED",
+            customer_id=orders[0].customer_id,
+            product_id=orders[0].product_id,
+            formula_id=orders[0].formula_id,
+            formula_snapshot=orders[0].formula_snapshot,
+            spec_params={"厚度": "50μm", "宽度": "300mm"},
+            quantity=100,
+            unit="kg",
+            status=OrderStatus.PRODUCING,
+            task_id=queued_task.id,
+        )
+    )
+    await db_session.commit()
+
+    with pytest.raises(HTTPException, match="任务队列已变化"):
+        await schedule_service.apply_schedule_plan(db_session, plan.id, "test-user")
+    await db_session.rollback()
 
 
 async def test_confirm_schedule_clears_workspace_in_same_commit(client, db_session):

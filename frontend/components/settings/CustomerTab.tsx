@@ -62,7 +62,8 @@ export default function CustomerTab() {
   }
 
   useEffect(() => {
-    load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function openCreate() {

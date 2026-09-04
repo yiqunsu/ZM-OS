@@ -157,7 +157,10 @@ export default function FormulaTab() {
     setProducts(p);
     setLoading(false);
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function openCreate() {
     setEditing(null);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { api, postStream } from "@/lib/api"
-import OrderForm, { type OrderDraft, type OrderFormHandle } from "@/components/orders/OrderForm"
+import OrderForm, { type OrderDraft } from "@/components/orders/OrderForm"
 import SchedulePlanPanel from "@/components/chat/SchedulePlanPanel"
 import {
   isUserMessageCommittedEvent,
@@ -707,7 +707,6 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
   const [draft, setDraft] = useState<OrderDraft | null>(null)
   const [schedulePlan, setSchedulePlan] = useState<SchedulePlan | null>(null)
   const [mobileView, setMobileView] = useState<"chat" | "form">("chat")
-  const orderFormRef = useRef<OrderFormHandle>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const heroTextareaRef = useRef<HTMLTextAreaElement>(null)
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1071,13 +1070,9 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
               ? { spec_params: { ...(prev?.spec_params ?? {}), ...fields.spec_params } }
               : {}),
           }))
-        } else if (event.type === "form_submit") {
-          if (!orderFormRef.current) {
-            succeeded = false
-            setError("订单表单已关闭，请重新打开后下发")
-          } else if (!(await orderFormRef.current.submit())) {
-            succeeded = false
-          }
+        } else if (event.type === "order_created") {
+          // The backend has already created the order atomically. The following
+          // panel/delta events update the visible workspace and conversation.
         } else if (event.type === "schedule_plan") {
           setSchedulePlan(event.plan as unknown as SchedulePlan)
           setPanelOpen(true)
@@ -1223,7 +1218,14 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
     setPendingToolCall(null)
     setIsLoading(true)
     try {
-      const res = await postStream("/agent/chat/confirm", { session_id: sessionIdRef.current })
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current)
+        draftSaveTimerRef.current = null
+      }
+      const res = await postStream("/agent/chat/confirm", {
+        session_id: sessionIdRef.current,
+        ...(currentPending.name === "submit_order_form" ? { order_draft: draft } : {}),
+      })
       await consumeStream(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : "确认失败")
@@ -1500,7 +1502,6 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
               />
             ) : (
               <OrderForm
-                ref={orderFormRef}
                 variant="panel"
                 draft={draft}
                 onDraftChange={persistOrderDraft}

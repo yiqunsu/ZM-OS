@@ -8,7 +8,7 @@ clean up manually rather than relying on the transactional-rollback fixture.
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.agent.skills as skills_mod
@@ -175,7 +175,28 @@ async def test_run_write_tool_creates_order(agent_db):
 
 
 async def test_submit_order_confirmation_is_consumed_once(client, db_session):
-    session = ChatSession(title="order form confirmation", user_id="test-user")
+    category = ProductCategory(name="确认下单大类")
+    customer = Customer(company="确认下单客户", contact="王工")
+    db_session.add_all([category, customer])
+    await db_session.flush()
+    product = Product(name="确认下单产品", category_id=category.id)
+    db_session.add(product)
+    await db_session.flush()
+    session = ChatSession(
+        title="order form confirmation",
+        user_id="test-user",
+        active_workspace="order_form",
+        workspace_state={
+            "order_draft": {
+                "customer_id": customer.id,
+                "product_id": product.id,
+                "spec_params": {"宽度": "400mm"},
+                "quantity": "300",
+                "unit": "kg",
+                "formula_mode": "none",
+            }
+        },
+    )
     db_session.add(session)
     await db_session.flush()
     db_session.add(
@@ -198,9 +219,56 @@ async def test_submit_order_confirmation_is_consumed_once(client, db_session):
         "/api/agent/chat/confirm", json={"session_id": session.id}
     )
     assert response.status_code == 200
-    assert '"type": "form_submit"' in response.text
+    assert '"type": "order_created"' in response.text
+    assert '"type": "panel", "panel": "order_form", "action": "close"' in response.text
+    assert "已创建订单" in response.text
+
+    created_count = await db_session.scalar(
+        select(func.count()).select_from(Order).where(Order.customer_id == customer.id)
+    )
+    assert created_count == 1
+    await db_session.refresh(session)
+    assert session.active_workspace is None
+    assert session.workspace_state is None
 
     duplicate = await client.post(
         "/api/agent/chat/confirm", json={"session_id": session.id}
     )
     assert duplicate.status_code == 404
+    duplicate_count = await db_session.scalar(
+        select(func.count()).select_from(Order).where(Order.customer_id == customer.id)
+    )
+    assert duplicate_count == 1
+
+
+async def test_submit_order_confirmation_keeps_pending_when_draft_is_invalid(
+    client,
+    db_session,
+):
+    session = ChatSession(
+        title="invalid order form confirmation",
+        user_id="test-user",
+        active_workspace="order_form",
+        workspace_state={"order_draft": {"quantity": ""}},
+    )
+    db_session.add(session)
+    await db_session.flush()
+    pending = ChatMessage(
+        session_id=session.id,
+        role="assistant",
+        tool_calls=[{"name": "submit_order_form", "args": {}}],
+        is_pending=True,
+    )
+    db_session.add(pending)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/agent/chat/confirm",
+        json={"session_id": session.id},
+    )
+
+    assert response.status_code == 409
+    await db_session.refresh(pending)
+    await db_session.refresh(session)
+    assert pending.is_pending is True
+    assert session.active_workspace == "order_form"

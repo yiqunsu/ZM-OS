@@ -16,7 +16,7 @@ FastAPI 在 OpenClaw 前后承担业务编排。OpenClaw继续负责自由文本
 4. SSE 打开订单表单并推送 `form_update`；
 5. OrderForm 现有 dirty-field 机制保证人工编辑优先。
 
-聊天下发复用现有 pending ChatMessage 机制，但新增运行时无关的 `submit_order_form` pending action。确认端点返回 `form_submit`，前端在用户已经点击确认后调用表单当前提交路径。
+聊天下发复用现有 pending ChatMessage 机制，但新增运行时无关的 `submit_order_form` pending action。确认请求携带当前草稿；后端在同一事务内创建可选新配方、订单、成功消息，消费 pending 并关闭工作区，随后返回 `order_created` SSE。前端不再二次提交订单。右侧人工下发也调用同一原子草稿用例。
 
 ## 3. Scheduling engine
 
@@ -28,11 +28,11 @@ FastAPI 在 OpenClaw 前后承担业务编排。OpenClaw继续负责自由文本
 (formula/material, product_category, thickness, pattern)
 ```
 
-换产成本采用字典序比较而非任意加权总分：配方变化、产品大类变化、厚度变化、花纹变化、宽度变化。候选换产键相同时比较预测负载，最后比较机器名称以保证确定性。
+换产成本采用字典序比较而非任意加权总分：配方变化、产品大类变化、厚度变化、花纹变化、宽度变化、幅宽闲置比例。候选键相同时比较按 kg 折算的预测队列负载，最后比较机器名称和 ID 以保证确定性。
 
 订单按生产签名与创建时间处理。相同签名订单优先装入同一任务；合计宽度必须位于机器宽度范围内且不超过最大宽度。无法提取宽度或没有可行机器的订单进入 `unassigned`。
 
-方案以 `SchedulePlan` 存入 PostgreSQL，保存输入订单 ID 和 `updated_at` 指纹、任务 JSON、未排原因、创建用户和状态。确认时加锁重新读取所有订单和机器，校验方案未过期，然后调用新的批量 `apply_schedule_plan` 用例，在一次事务中创建全部任务。订单编号使用 PostgreSQL 序列生成，避免并发创建或删除订单后复用编号。
+方案以 `SchedulePlan` 存入 PostgreSQL，保存输入订单、完整待排集合、启用机器集合、机器能力和未完成队列指纹，以及任务 JSON、未排原因、创建用户和状态。确认时加锁重新读取所有订单和机器；任一指纹变化都要求重新生成方案。通过后由 `apply_schedule_plan` 在一次事务中创建全部任务。订单编号使用 PostgreSQL 序列生成，避免并发创建或删除订单后复用编号。
 
 ## 4. Frontend workspace
 
@@ -71,3 +71,16 @@ composer-selected
 - 写操作均需显式用户点击确认。
 - `AGENT_RUNTIME=langgraph` 仍可回退；新排产服务与运行时无关。
 - migration 新增 SchedulePlan、ChatAttachment、聊天工作区字段和订单号序列，不改变现有订单/任务状态含义。
+
+## 7. Production mutation safety refactor
+
+人工看板与智能排产必须复用同一份生产兼容规则：机器启用、产品大类、花纹能力、幅宽范围和合并生产签名。共享规则位于后端 Service 层，前端只表达用户动作。
+
+看板写入改成动作级原子用例：
+
+- 移动订单：一个接口覆盖待排订单新建任务、并入任务、任务间移动、拆为新任务和退回待排；
+- 移动任务：在后端锁定源/目标机器并重写两个队列位置；
+- 同机重排：提交完整有序任务 ID 集合，后端校验集合未过期后一次重写；
+- 状态迁移：新排任务为 `WAITING`，只允许 `WAITING -> PRODUCING -> DONE`，同一机器最多一个 `PRODUCING` 任务。
+
+每个动作只提交一次事务，并返回提交后的完整看板快照。前端不再使用多个 `PUT` 拼装一个拖拽动作；失败时显示后端错误并重新加载权威快照。

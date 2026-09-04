@@ -14,11 +14,18 @@ from app.schemas.chat import (
     ChatMessageOut,
     ChatSessionOut,
     ConfirmRequest,
+    OrderConfirmRequest,
+    OrderWorkspaceDraft,
     OrderWorkspaceDraftRequest,
     SendMessageRequest,
     WorkspaceStateOut,
 )
-from app.services import chat_attachment_service, chat_service, schedule_service
+from app.services import (
+    chat_attachment_service,
+    chat_service,
+    order_submission_service,
+    schedule_service,
+)
 
 router = APIRouter(prefix="/agent", tags=["agent"], dependencies=[Depends(get_current_user)])
 
@@ -203,7 +210,7 @@ async def send_message(
 
 @router.post("/chat/confirm")
 async def confirm(
-    body: ConfirmRequest,
+    body: OrderConfirmRequest,
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -212,9 +219,48 @@ async def confirm(
         raise HTTPException(404, "没有待确认的操作")
     action, args = _pending_action(pending)
     if action == "submit_order_form":
-        pending.is_pending = False
-        await db.commit()
-        return _sse(_events({"type": "form_submit"}))
+        try:
+            session = await chat_service.require_session(
+                db,
+                body.session_id,
+                user.id,
+                for_update=True,
+            )
+            state = session.workspace_state if isinstance(session.workspace_state, dict) else {}
+            raw_draft = (
+                body.order_draft.model_dump()
+                if body.order_draft is not None
+                else state.get("order_draft")
+            )
+            if not isinstance(raw_draft, dict):
+                raise HTTPException(409, "订单表单内容不存在，请重新打开后录入")
+            draft = OrderWorkspaceDraft.model_validate(raw_draft).model_dump()
+            order = await order_submission_service.create_from_workspace_draft(db, draft)
+            pending.is_pending = False
+            session.active_workspace = None
+            session.workspace_state = None
+            assistant_msg = ChatMessage(
+                session_id=body.session_id,
+                role="assistant",
+                content=f"✅ 已创建订单 No.{order.order_no}，可在「订单列表」查看。",
+            )
+            db.add(assistant_msg)
+            await db.commit()
+            await db.refresh(assistant_msg)
+        except Exception:
+            await db.rollback()
+            raise
+        return _sse(
+            _events(
+                {
+                    "type": "order_created",
+                    "order": {"id": order.id, "order_no": order.order_no},
+                },
+                {"type": "panel", "panel": "order_form", "action": "close"},
+                {"type": "delta", "content": assistant_msg.content},
+                {"type": "text_done", "message_id": assistant_msg.id, "user_message_id": ""},
+            )
+        )
     if action == "execute_schedule_plan":
         plan_id = str(args.get("plan_id") or "")
         if not plan_id:

@@ -20,6 +20,20 @@ class OrderCreate(BaseModel):
     extra_notes: str | None = None
 
 
+class OrderDraftCreate(BaseModel):
+    customer_id: str = Field(default="", max_length=128)
+    product_id: str = Field(default="", max_length=128)
+    spec_params: dict[str, str] = Field(default_factory=dict)
+    quantity: str | float = ""
+    unit: Literal["kg", "t"] = "kg"
+    formula_mode: Literal["none", "existing", "new"] = "none"
+    formula_id: str = Field(default="", max_length=128)
+    formula_materials: str = Field(default="", max_length=10000)
+    new_formula_name: str = Field(default="", max_length=255)
+    new_formula_materials: str = Field(default="", max_length=10000)
+    extra_notes: str = Field(default="", max_length=10000)
+
+
 class OrderUpdate(BaseModel):
     customer_id: str | None = None
     product_id: str | None = None

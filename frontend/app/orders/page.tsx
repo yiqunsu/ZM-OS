@@ -91,7 +91,10 @@ export default function OrdersPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function openDetail(order: Order) {
     setDetailLoading(true);

@@ -20,3 +20,4 @@ Read first:
 | [Logging](logging-guidelines.md) | structlog, request logs, audit, Sentry, and Phoenix |
 | [Quality](quality-guidelines.md) | Required patterns, tests, and review checks |
 | [Chat attachments](chat-attachment-guidelines.md) | Persisted image metadata, SSE commit lifecycle, authorization, failure recovery, and deployment storage |
+| [Production workflow](production-workflow-guidelines.md) | Atomic order submission, Kanban mutations, scheduling rules, stale-plan rejection, and cross-layer API contracts |

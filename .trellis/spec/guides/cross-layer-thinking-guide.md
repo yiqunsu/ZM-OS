@@ -299,6 +299,54 @@ Create detailed flow docs when:
 
 ---
 
+## User Intent Must Be One Backend Transaction
+
+Interactive UIs often make a single user action look like several convenient
+HTTP calls. That is unsafe when the action changes related business records.
+
+Examples include:
+
+- confirming an Agent-prepared order and consuming its confirmation token
+- moving an order between production tasks
+- reordering a machine queue
+- creating a formula together with the order that first uses it
+
+### Contract
+
+```text
+one user intent -> one command endpoint -> lock + validate + one commit
+                -> one authoritative response snapshot
+```
+
+- The backend service owns all business validation and transaction boundaries.
+- The frontend sends intent, not a sequence of low-level mutations.
+- Success means the entire action committed. Failure means none of it committed.
+- Retries must be idempotent or guarded by a consumed token / current-state check.
+- The response contains the authoritative state needed to replace affected UI
+  state; the browser must not guess the final result with an optimistic patch.
+
+### Wrong
+
+```text
+drag -> remove from source -> add to target -> reorder both columns
+confirm -> create formula -> create order -> clear pending message
+```
+
+Any middle failure leaves partial business state, while retry can duplicate the
+completed prefix.
+
+### Review Checklist
+
+- [ ] Can this UI action be described as one business verb?
+- [ ] Does that verb map to exactly one backend command endpoint?
+- [ ] Are all affected rows locked and committed together?
+- [ ] Does the command reject stale source state before writing?
+- [ ] Does the success response replace local state from the server?
+- [ ] Does a duplicate request leave business data unchanged?
+- [ ] Is there an integration test for both success and rollback?
+
+---
+
 ## Event Log / Projection Boundary
 
 Append-only logs are cross-layer contracts. A single event travels through:

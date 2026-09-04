@@ -35,6 +35,11 @@ export interface KanbanMachine {
   tasks:      KanbanTask[];
 }
 
+export interface KanbanSnapshot {
+  machines:       KanbanMachine[];
+  pending_orders: KanbanOrder[];
+}
+
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   WAITING:   "待生产",
   PRODUCING: "生产中",

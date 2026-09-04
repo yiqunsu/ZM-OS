@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input }    from "@/components/ui/input";
 import { Label }    from "@/components/ui/label";
@@ -121,11 +121,6 @@ export interface OrderDraft {
   extra_notes?: string;
 }
 
-export interface OrderFormHandle {
-  /** Submit the form using its *current* values (used by the agent's「下发」path). */
-  submit: () => Promise<boolean>;
-}
-
 interface OrderFormProps {
   orderId?: string;
   /** "page" = standalone route; "panel" = embedded in the chat split view. */
@@ -143,10 +138,14 @@ interface OrderFormProps {
 /* ═══════════════════════════════════════
    Main Component
 ═══════════════════════════════════════ */
-const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm(
-  { orderId, variant = "page", draft = null, onDraftChange, onSubmitted, onCancel },
-  ref,
-) {
+export default function OrderForm({
+  orderId,
+  variant = "page",
+  draft = null,
+  onDraftChange,
+  onSubmitted,
+  onCancel,
+}: OrderFormProps) {
   const router  = useRouter();
   const isEdit  = Boolean(orderId);
   const isPanel = variant === "panel";
@@ -200,7 +199,7 @@ const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm
   }
 
   /* ─── Load ─── */
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
@@ -247,9 +246,12 @@ const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm
     } finally {
       setLoading(false);
     }
-  }
+  }, [orderId]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   /* ─── Agent draft → form (progressive, respects manual edits) ─── */
   useEffect(() => {
@@ -433,39 +435,45 @@ const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm
 
     setSaving(true); setError("");
     try {
-      let formulaId: string | null = null;
-
-      if (form.formulaMode === "new") {
-        if (!form.newFormulaName.trim()) { setError("请填写配方名称"); setSaving(false); return false; }
-        try {
+      let result: { order_no?: string; id?: string };
+      if (isEdit) {
+        let formulaId: string | null = null;
+        if (form.formulaMode === "new") {
+          if (!form.newFormulaName.trim()) { setError("请填写配方名称"); return false; }
           const created = await api.post<Formula>("/formulas", {
-            name:        form.newFormulaName.trim(),
-            product_id:  form.productId,
+            name: form.newFormulaName.trim(),
+            product_id: form.productId,
             spec_params: specParamsToObj(form.specParams),
-            materials:   form.newFormulaMaterials,
+            materials: form.newFormulaMaterials,
           });
           formulaId = created.id;
-        } catch {
-          setError("配方创建失败");
-          setSaving(false);
-          return false;
+        } else if (form.formulaMode === "existing" && form.formulaId) {
+          formulaId = form.formulaId;
         }
-      } else if (form.formulaMode === "existing" && form.formulaId) {
-        formulaId = form.formulaId;
+        result = await api.put<{ order_no?: string; id?: string }>(`/orders/${orderId}`, {
+          customer_id: form.customerId,
+          product_id: form.productId,
+          spec_params: specParamsToObj(form.specParams),
+          quantity: Number(form.quantity),
+          unit: form.unit,
+          formula_id: formulaId,
+          extra_notes: form.extraNotes,
+        });
+      } else {
+        result = await api.post<{ order_no?: string; id?: string }>("/orders/from-draft", {
+          customer_id: form.customerId,
+          product_id: form.productId,
+          spec_params: specParamsToObj(form.specParams),
+          quantity: form.quantity,
+          unit: form.unit,
+          formula_mode: form.formulaMode,
+          formula_id: form.formulaId,
+          formula_materials: form.formulaMaterials,
+          new_formula_name: form.newFormulaName,
+          new_formula_materials: form.newFormulaMaterials,
+          extra_notes: form.extraNotes,
+        });
       }
-
-      const payload = {
-        customer_id: form.customerId,
-        product_id:  form.productId,
-        spec_params: specParamsToObj(form.specParams),
-        quantity:    Number(form.quantity),
-        unit:        form.unit,
-        formula_id:  formulaId,
-        extra_notes: form.extraNotes,
-      };
-      const result = isEdit
-        ? await api.put<{ order_no?: string; id?: string }>(`/orders/${orderId}`, payload)
-        : await api.post<{ order_no?: string; id?: string }>("/orders", payload);
       if (onSubmitted) onSubmitted(result ?? {});
       else router.push("/orders");
       return true;
@@ -476,9 +484,6 @@ const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm
       setSaving(false);
     }
   }
-
-  /* Expose submit() so the agent's「确认下发」can trigger the same create path. */
-  useImperativeHandle(ref, () => ({ submit: handleSave }));
 
   const selectedProduct    = products.find((p) => p.id === form.productId);
   const selectedCategoryId = selectedProduct?.category_id;
@@ -858,6 +863,4 @@ const OrderForm = forwardRef<OrderFormHandle, OrderFormProps>(function OrderForm
       </Dialog>
     </div>
   );
-});
-
-export default OrderForm;
+}

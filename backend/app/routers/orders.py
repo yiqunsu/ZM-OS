@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.schemas.order import OrderCreate, OrderOut, OrderUpdate
-from app.services import order_service
+from app.schemas.order import OrderCreate, OrderDraftCreate, OrderOut, OrderUpdate
+from app.services import order_service, order_submission_service
 
 router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(get_current_user)])
 
@@ -31,6 +31,20 @@ async def create_order(body: OrderCreate, db: AsyncSession = Depends(get_db)):
         body.formula_id,
         body.extra_notes,
     )
+
+
+@router.post("/from-draft", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
+async def create_order_from_draft(body: OrderDraftCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        order = await order_submission_service.create_from_workspace_draft(
+            db,
+            body.model_dump(),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return await order_service.get_order(db, order.id)
 
 
 @router.put("/{order_id}", response_model=OrderOut)

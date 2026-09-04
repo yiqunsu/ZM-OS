@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.order import OrderStatus
 from app.models.production import TaskStatus
@@ -38,6 +38,24 @@ class ProductionTaskUpdate(BaseModel):
     position: int | None = None
     machine_id: str | None = None
     order_ids: list[str] | None = None
+
+
+class ProductionOrderMove(BaseModel):
+    order_id: str
+    source_task_id: str | None = None
+    target_task_id: str | None = None
+    target_machine_id: str | None = None
+
+
+class ProductionTaskMove(BaseModel):
+    task_id: str
+    target_machine_id: str
+    target_index: int = Field(ge=0)
+
+
+class ProductionTaskReorder(BaseModel):
+    machine_id: str
+    ordered_task_ids: list[str]
 
 
 class ProductionTaskOut(BaseModel):

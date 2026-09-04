@@ -39,6 +39,18 @@ export default function SchedulePlanPanel({
                 </span>
               </div>
               <div className="space-y-3 px-4 py-3">
+                <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  {task.width_utilization != null && (
+                    <span className="rounded-md bg-emerald-50 px-2 py-1 font-medium text-emerald-700">
+                      幅宽利用率 {(task.width_utilization * 100).toFixed(1)}%
+                    </span>
+                  )}
+                  {task.total_quantity_kg != null && (
+                    <span className="rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700">
+                      任务重量 {Number(task.total_quantity_kg.toFixed(2))}kg
+                    </span>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {task.order_nos.map((orderNo) => (
                     <span key={orderNo} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
