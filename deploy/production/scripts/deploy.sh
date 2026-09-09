@@ -43,9 +43,11 @@ fi
 
 "${SCRIPT_DIR}/verify-casdoor.sh"
 
-printf 'Starting OpenClaw...\n'
-compose up -d openclaw
-wait_for_service_health openclaw 180
+if [[ "${AGENT_RUNTIME:-langgraph}" == "openclaw" ]]; then
+  printf 'Starting OpenClaw...\n'
+  compose up -d openclaw
+  wait_for_service_health openclaw 180
+fi
 
 has_existing_schema="$(
   compose exec -T postgres psql \

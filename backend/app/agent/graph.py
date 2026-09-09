@@ -43,6 +43,8 @@ def _build_model() -> ChatOpenAI:
         base_url=settings.LLM_BASE_URL,
         max_tokens=2048,
         temperature=0.3,
+        timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
+        max_retries=1,
     )
 
 

@@ -50,7 +50,7 @@ services:
       CASDOOR_JWKS_URL: http://casdoor:8000/.well-known/jwks
       CASDOOR_ORGANIZATION: filmos
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      AGENT_RUNTIME: ${AGENT_RUNTIME:-openclaw}
+      AGENT_RUNTIME: ${AGENT_RUNTIME:-langgraph}
       OPENCLAW_BASE_URL: http://openclaw:18789
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
       OPENCLAW_AGENT_ID: filmos-web
@@ -117,6 +117,7 @@ services:
     logging: *default-logging
 
   openclaw:
+    profiles: [openclaw]
     image: ghcr.io/openclaw/openclaw:2026.7.1-slim@sha256:6a31d44b2944e7adcd2b582bf6fb463111264ebca97a0201795b799135bd102c
     restart: unless-stopped
     init: true
@@ -124,9 +125,9 @@ services:
       OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
       OPENCLAW_STATE_DIR: /home/node/.openclaw
       OPENCLAW_WORKSPACE_DIR: /workspace
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env.production}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
       OPENCLAW_DISABLE_BONJOUR: "1"
-      LLM_API_KEY: ${QWEN_API_KEY:?Set QWEN_API_KEY in .env.production}
+      LLM_API_KEY: ${QWEN_API_KEY:-}
       LLM_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       LLM_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
     command:

@@ -99,7 +99,7 @@ case "${WECHAT_LOGIN_ENABLED:-false}" in
     ;;
 esac
 
-case "${AGENT_RUNTIME:-openclaw}" in
+case "${AGENT_RUNTIME:-langgraph}" in
   openclaw)
     [[ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]] \
       || die "OPENCLAW_GATEWAY_TOKEN must be set when AGENT_RUNTIME=openclaw"

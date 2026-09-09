@@ -5,7 +5,7 @@ import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { api, postStream } from "@/lib/api"
 import OrderForm, { type OrderDraft } from "@/components/orders/OrderForm"
-import SchedulePlanPanel from "@/components/chat/SchedulePlanPanel"
+import SchedulingWorkspace from "@/components/chat/SchedulingWorkspace"
 import {
   isUserMessageCommittedEvent,
   type ChatMessage,
@@ -703,6 +703,8 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
   const [imageNotice, setImageNotice] = useState<string | null>(null)
   const [sentImageLightbox, setSentImageLightbox] = useState<{ src: string; alt: string } | null>(null)
   // ─── 协同录单分栏 ───
+  // panelKind：当前会话挂着哪个工作区（收起后仍保留）；panelOpen：右侧是否展开。
+  const [panelKind, setPanelKind] = useState<"order_form" | "schedule_plan" | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [draft, setDraft] = useState<OrderDraft | null>(null)
   const [schedulePlan, setSchedulePlan] = useState<SchedulePlan | null>(null)
@@ -747,11 +749,13 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
         setMessages(history)
         setPendingToolCall(pendingToolCallFrom(history))
         if (workspace.active_workspace === "order_form") {
+          setPanelKind("order_form")
           setPanelOpen(true)
           setDraft(workspace.order_draft)
           setSchedulePlan(null)
           setMobileView("form")
         } else if (workspace.active_workspace === "schedule_plan" && workspace.schedule_plan) {
+          setPanelKind("schedule_plan")
           setPanelOpen(true)
           setDraft(null)
           setSchedulePlan(workspace.schedule_plan)
@@ -865,6 +869,7 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
       clearTimeout(draftSaveTimerRef.current)
       draftSaveTimerRef.current = null
     }
+    setPanelKind(null)
     setPanelOpen(false)
     setDraft(null)
     setSchedulePlan(null)
@@ -896,12 +901,19 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
     }
   }
 
-  function closeOrderPanel() {
-    closePanelState()
-    void clearWorkspace()
+  // 右上角 ✕ 只是收起：草稿/草案与服务端工作区都保留，可从对话头部重新打开。
+  function collapsePanel() {
+    setPanelOpen(false)
+    setMobileView("chat")
   }
 
-  function closeSchedulePanel() {
+  function reopenPanel() {
+    setPanelOpen(true)
+    setMobileView("form")
+  }
+
+  // 表单内的「取消」才是真正放弃录单。
+  function cancelOrderPanel() {
     closePanelState()
     void clearWorkspace()
   }
@@ -1055,6 +1067,7 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
           break outer
         } else if (event.type === "panel") {
           if (event.action === "open") {
+            setPanelKind(event.panel === "order_form" ? "order_form" : "schedule_plan")
             setPanelOpen(true)
             if (event.panel === "order_form") setSchedulePlan(null)
             setMobileView("form")
@@ -1075,6 +1088,7 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
           // panel/delta events update the visible workspace and conversation.
         } else if (event.type === "schedule_plan") {
           setSchedulePlan(event.plan as unknown as SchedulePlan)
+          setPanelKind("schedule_plan")
           setPanelOpen(true)
           setMobileView("form")
         } else if (event.type === "schedule_applied") {
@@ -1342,9 +1356,9 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
   }
 
   // ─── 对话态（含协同录单分栏）────────────────────────────────────────────────
-  // 面板打开时，桌面端对话与表单各占一半；手机端用顶部切换。
+  // 排产工作区优先分配宽度；录单仍保持均分，手机端用顶部切换。
   const chatColClass = panelOpen
-    ? `flex-col min-w-0 min-h-0 w-full md:w-1/2 md:shrink-0 ${
+    ? `flex-col min-w-0 min-h-0 w-full ${schedulePlan ? "md:w-[38%]" : "md:w-1/2"} md:shrink-0 ${
         mobileView === "chat" ? "flex" : "hidden"
       } md:flex`
     : "flex flex-col flex-1 min-w-0 min-h-0"
@@ -1377,6 +1391,18 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
                 <div className="text-sm font-semibold text-slate-800 leading-tight">FilmOS 助手</div>
                 <div className="text-[11px] text-slate-400 leading-tight">智能录单 · 排产</div>
               </div>
+              {panelKind && !panelOpen && (
+                <button
+                  onClick={reopenPanel}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#C8331F] hover:bg-[#C8331F]/10 text-xs font-medium transition-colors"
+                  title={schedulePlan ? "重新打开排产方案" : "重新打开录入订单"}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                  </svg>
+                  {schedulePlan ? "排产方案" : "录入订单"}
+                </button>
+              )}
               <button
                 onClick={resetConversation}
                 disabled={isLoading || isHistoryLoading || isConfirming}
@@ -1463,7 +1489,7 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
           </div>
         </div>
 
-        {/* 录入订单面板 */}
+        {/* 录入订单 / 排产方案面板：仅在 agent 打开工作区后显示 */}
         {panelOpen && (
           <aside
             className={`flex-col w-full md:flex-1 min-w-0 border-l border-slate-200 bg-slate-50 ${
@@ -1485,8 +1511,8 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
                 </div>
               </div>
               <button
-                onClick={schedulePlan ? closeSchedulePanel : closeOrderPanel}
-                title="关闭表单"
+                onClick={collapsePanel}
+                title={schedulePlan ? "收起排产方案" : "收起录入订单"}
                 className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1495,10 +1521,11 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
               </button>
             </div>
             {schedulePlan ? (
-              <SchedulePlanPanel
-                plan={schedulePlan}
-                onConfirmRequest={() => send("确认排产")}
+              <SchedulingWorkspace
+                key={schedulePlan.id}
+                planId={schedulePlan.id}
                 disabled={isLoading || isConfirming || Boolean(pendingToolCall)}
+                onApplied={() => { closePanelState(); setHistoryRetryKey(value => value + 1) }}
               />
             ) : (
               <OrderForm
@@ -1506,7 +1533,7 @@ export default function ChatInterface({ requestedSessionId = null }: ChatInterfa
                 draft={draft}
                 onDraftChange={persistOrderDraft}
                 onSubmitted={handleOrderSubmitted}
-                onCancel={closeOrderPanel}
+                onCancel={cancelOrderPanel}
               />
             )}
           </aside>

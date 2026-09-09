@@ -21,6 +21,7 @@ from app.routers import (
     product_categories,
     production_tasks,
     products,
+    schedules,
 )
 
 configure_logging()
@@ -84,5 +85,6 @@ for router in (
     production_tasks.router,
     kanban.router,
     agent.router,
+    schedules.router,
 ):
     app.include_router(router, prefix="/api")

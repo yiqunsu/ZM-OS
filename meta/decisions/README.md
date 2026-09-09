@@ -54,3 +54,4 @@ NNNN-short-kebab-case-title.md
 | [0006](0006-single-host-production-deployment.md) | 采用单机 Docker Compose 生产部署 | Accepted |
 | [0007](0007-casdoor-oidc-and-fastapi-rbac.md) | 采用 Casdoor OIDC 与 FastAPI RBAC | Accepted |
 | [0008](0008-store-chat-attachments-on-private-volume.md) | 聊天附件使用后端私有持久卷 | Accepted |
+| [0009](0009-langgraph-scheduling-workspace.md) | 受限 LangGraph 排单助手与草案看板 | Accepted |

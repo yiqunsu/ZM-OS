@@ -1,5 +1,11 @@
 # FilmOS (ZM-OS)
 
+> **development 分支**：正在采用受限 LangGraph 排单助手与右侧草案看板。
+> 默认 `AGENT_RUNTIME=langgraph`，模型只有查询和生成草案工具，执行在右侧明确确认。
+> 本分支的运行与发布说明见 [开发部署说明](deploy/production/DEVELOPMENT.md)，
+> 新架构决策见 [ADR 0009](meta/decisions/0009-langgraph-scheduling-workspace.md)。
+> 下文 OpenClaw 主路径描述属于此前架构；在本分支 OpenClaw 仅为显式可选路径。
+
 塑料薄膜工厂的订单管理系统：把「微信收单 → 手工录 Excel → 白板排产」的流程，替换成一套带 AI 助手的 Web 系统——对话式录单、看板式排产、生产任务跟踪。
 
 这是原 Next.js 全栈单体应用的重写版，转向 **Python 主导、前后端分离** 的架构，目标是贴近专业 SaaS 团队的工程实践（分层、鉴权、测试、CI/CD、可观测性、AI Agent）。

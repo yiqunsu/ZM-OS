@@ -40,6 +40,78 @@ _ACTIVE_MACHINE_SET_KEY = "__active_machine_set__"
 _MACHINE_KEY_PREFIX = "machine:"
 
 
+def plan_revision(plan: SchedulePlan) -> str:
+    return _stable_hash({"tasks": plan.tasks, "unassigned": plan.unassigned})
+
+
+def plan_payload(plan: SchedulePlan) -> dict[str, Any]:
+    return {
+        "id": plan.id, "status": plan.status.value, "tasks": plan.tasks,
+        "unassigned": plan.unassigned, "created_at": plan.created_at.isoformat(),
+        "revision": plan_revision(plan),
+    }
+
+
+async def require_plan(
+    db: AsyncSession, plan_id: str, user_id: str, *, lock: bool = False,
+) -> SchedulePlan:
+    stmt = select(SchedulePlan).where(
+        SchedulePlan.id == plan_id, SchedulePlan.created_by_id == user_id,
+    )
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    plan = (await db.execute(stmt)).scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(404, "排产方案不存在")
+    return plan
+
+
+async def plan_is_stale(db: AsyncSession, plan: SchedulePlan) -> bool:
+    return plan.input_fingerprint != _input_fingerprint(
+        await _load_orders(db), await _load_machines(db),
+    )
+
+
+async def update_schedule_draft(
+    db: AsyncSession, plan_id: str, user_id: str, revision: str, tasks: list[dict],
+) -> SchedulePlan:
+    plan = await require_plan(db, plan_id, user_id, lock=True)
+    if plan.status != SchedulePlanStatus.DRAFT or revision != plan_revision(plan):
+        raise HTTPException(409, "草案已被修改或执行，请重新加载")
+    if await plan_is_stale(db, plan):
+        raise HTTPException(409, "生产数据已变化，请重新生成方案")
+    orders = {order.id: order for order in await _load_orders(db)}
+    machines = {machine.id: machine for machine in await _load_machines(db)}
+    assigned: set[str] = set()
+    normalized = []
+    for task in tasks:
+        machine = machines.get(task["machine_id"])
+        if machine is None:
+            raise HTTPException(409, "机器不存在或已停用")
+        ids = task["order_ids"]
+        if any(key in assigned for key in ids) or len(ids) != len(set(ids)):
+            raise HTTPException(409, "草案中存在重复订单")
+        if any(key not in plan.input_order_ids or key not in orders for key in ids):
+            raise HTTPException(409, "订单不属于本草案")
+        batch = [orders[key] for key in ids]
+        width = validate_machine_batch(machine, batch)
+        assigned.update(ids)
+        normalized.append({
+            "machine_id": machine.id, "machine_name": machine.name,
+            "order_ids": ids, "order_nos": [order.order_no for order in batch],
+            "total_width": width, "width_utilization": round(width / machine.max_width, 4),
+            "total_quantity_kg": sum(_quantity_kg(order) for order in batch),
+            "reason": "人工调整；已通过机器能力与合并规则校验",
+        })
+    plan.tasks = normalized
+    plan.unassigned = [
+        {"order_id": key, "order_no": orders[key].order_no, "reason": "尚未安排到草案任务"}
+        for key in plan.input_order_ids if key not in assigned
+    ]
+    await db.commit()
+    return plan
+
+
 @dataclass(slots=True)
 class MachineState:
     machine: Machine
@@ -359,6 +431,15 @@ def _machine_fingerprint(machine: Machine) -> str:
 
 def _input_fingerprint(orders: list[Order], machines: list[Machine]) -> dict[str, str]:
     fingerprint = {order.id: order.updated_at.isoformat() for order in orders}
+    fingerprint["__order_contents__"] = _stable_hash([
+        {
+            "id": order.id, "quantity": order.quantity, "unit": order.unit,
+            "spec": order.spec_params, "formula": order.formula_snapshot,
+            "product": order.product_id, "category": order.product.category_id,
+            "customer": order.customer_id, "formula_id": order.formula_id,
+        }
+        for order in sorted(orders, key=lambda item: item.id)
+    ])
     fingerprint[_PENDING_SET_KEY] = _stable_hash(sorted(order.id for order in orders))
     fingerprint[_ACTIVE_MACHINE_SET_KEY] = _stable_hash(sorted(machine.id for machine in machines))
     fingerprint.update(
@@ -504,6 +585,10 @@ async def apply_schedule_plan(
     )
     orders = list(order_result.scalars().all())
     orders_by_id = {order.id: order for order in orders}
+    expected_contents = plan.input_fingerprint.get("__order_contents__")
+    current_contents = _input_fingerprint(orders, active_machines)["__order_contents__"]
+    if expected_contents and expected_contents != current_contents:
+        raise HTTPException(409, "排产方案已过期：订单内容已变化")
     if set(orders_by_id) != set(plan.input_order_ids):
         raise HTTPException(409, "排产方案已过期：部分订单已不存在")
     for order in orders:

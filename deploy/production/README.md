@@ -1,5 +1,8 @@
 # FilmOS production deployment
 
+> development 分支默认采用 LangGraph，OpenClaw 改为可选 profile。
+> 发布前先阅读 [development 部署与验收](DEVELOPMENT.md)，并显式配置 `AGENT_RUNTIME=langgraph`。
+
 本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、Casdoor、OpenClaw 和 PostgreSQL 组成；Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 
 ICP备案通过前，Caddy 只监听服务器 `127.0.0.1`，必须通过 SSH 隧道访问。备案通过前不要添加公网 DNS，也不要开放公网 80/443。

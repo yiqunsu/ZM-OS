@@ -1,5 +1,10 @@
 # FilmOS Frontend
 
+development 新增 `components/chat/SchedulingWorkspace.tsx`：聊天右侧生产监控与草案编辑。
+实际队列每五秒刷新；草案订单可拖到机器、新任务、已有草案任务或未安排区，
+也可使用下拉框移动、箭头重排。每次修改由后端校验保存，再显示权威结果。
+执行前二次核对，绑定草案内容版本；后台数据变化后禁止执行并要求重新生成。
+
 Next.js（App Router）前端，是系统的 **UI 层**：渲染界面、处理登录、调用后端 API。**不直连数据库**，所有数据都经 FastAPI 后端。
 
 ---

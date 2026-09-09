@@ -1,5 +1,16 @@
 # FilmOS Backend
 
+## development 排单助手
+
+当前默认排单循环位于 `app/agent/scheduling.py`，通过 `SchedulingCapabilities`
+调用三个受限工具：`read_board`、`read_draft`、`generate_draft`。模型拿到工具结果后继续回答。
+图不依赖 ORM；进程内适配位于 `services/scheduling_agent_service.py`。
+提示词集中在 `app/agent/prompt_templates/scheduling-v1.md`，最多六次模型决策。
+聊天展示历史用于多轮上下文，生产确认不依赖模型或图内 interrupt。
+`/api/schedule-plans/{id}` 提供草案读取/更新，`/{id}/apply` 绑定内容版本执行。
+旧 `graph.py` 的 checkpoint 循环保留用于旧确认兼容；OpenClaw 不再是默认运行时。
+录单继续走现有受控字段提取/订单表单，尚未迁入新的排单图。
+
 FastAPI 后端，是系统的**唯一业务入口**：对外提供 REST API，内部承载业务逻辑、鉴权、AI Agent。前端只调这里，不直连数据库。
 
 ---

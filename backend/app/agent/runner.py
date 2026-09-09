@@ -573,7 +573,7 @@ async def stream_turn(
             yield event
         return
 
-    if _SCHEDULE_CONFIRM_RE.search(user_text):
+    if _SCHEDULE_CONFIRM_RE.search(user_text) and settings.AGENT_RUNTIME != "langgraph":
         async for event in _stream_schedule_confirmation(
             session_id,
             user_text,
@@ -585,7 +585,7 @@ async def stream_turn(
         return
 
     skill = skills.resolve_skill(user_text)
-    if skill.name == "schedule":
+    if skill.name == "schedule" and settings.AGENT_RUNTIME != "langgraph":
         async for event in _stream_schedule_plan(
             session_id,
             user_text,
@@ -596,7 +596,10 @@ async def stream_turn(
             yield event
         return
 
-    if image_data_url or skill.name == "create-order" or workspace == "order_form":
+    if (
+        image_data_url or skill.name == "create-order"
+        or (workspace == "order_form" and skill.name != "schedule")
+    ):
         async for event in _stream_order_intake(
             session_id,
             user_text,
@@ -618,13 +621,47 @@ async def stream_turn(
             yield event
         return
 
-    async for event in _stream_langgraph_turn(
-        session_id,
-        user_text,
-        user_email,
-        user_message_id,
-    ):
+    async for event in _stream_scheduling_turn(session_id, user_id, user_email, user_message_id):
         yield event
+
+
+async def _stream_scheduling_turn(
+    session_id: str, user_id: str, user_email: str | None, user_message_id: str,
+) -> AsyncGenerator[dict[str, Any], None]:
+    from app.agent.graph import _build_model
+    from app.agent.scheduling import build_scheduling_graph
+    from app.services import chat_service
+    from app.services.scheduling_agent_service import SchedulingAdapter
+
+    adapter = SchedulingAdapter(session_id, user_id)
+    try:
+        async with async_session() as db:
+            history = await chat_service.get_history(db, session_id, user_id)
+        messages = [
+            (HumanMessage if msg.role == "user" else AIMessage)(content=msg.content)
+            for msg in history[-40:] if msg.content and msg.role in {"user", "assistant"}
+        ]
+        graph = build_scheduling_graph(_build_model(), adapter)
+        async for update in graph.astream({"messages": messages, "steps": 0}, {"recursion_limit": 16}):
+            while adapter.events:
+                yield adapter.events.pop(0)
+            for node in ("agent", "limit"):
+                if node in update:
+                    reply = update[node]["messages"][-1]
+                    if not reply.tool_calls and isinstance(reply.content, str) and reply.content:
+                        saved = await _persist(session_id, role="assistant", content=reply.content)
+                        yield {"type": "delta", "content": reply.content}
+                        yield {
+                            "type": "text_done", "message_id": saved.id,
+                            "user_message_id": user_message_id,
+                        }
+        await _write_audit(session_id, user_email, "", "scheduling-v1", [], {})
+    except Exception as err:
+        logger.error("scheduling_agent_failed", error_type=type(err).__name__)
+        yield {
+            "type": "error", "error": "排单助手暂时不可用，请重试；可在右侧查看已保存草案。",
+            "user_message_id": user_message_id,
+        }
 
 
 async def stream_resume(
