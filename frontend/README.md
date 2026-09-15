@@ -1,9 +1,6 @@
 # FilmOS Frontend
 
-development 新增 `components/chat/SchedulingWorkspace.tsx`：聊天右侧生产监控与草案编辑。
-实际队列每五秒刷新；草案订单可拖到机器、新任务、已有草案任务或未安排区，
-也可使用下拉框移动、箭头重排。每次修改由后端校验保存，再显示权威结果。
-执行前二次核对，绑定草案内容版本；后台数据变化后禁止执行并要求重新生成。
+首页提供创建订单和排单两个专用入口，使用 `components/agent/`。桌面显示会话导航、对话与工作区，手机可切换对话/工作区。实际生产队列每 15 秒刷新；草稿确认绑定保存后的版本。旧聊天框和旧历史页已删除。
 
 Next.js（App Router）前端，是系统的 **UI 层**：渲染界面、处理登录、调用后端 API。**不直连数据库**，所有数据都经 FastAPI 后端。
 
@@ -28,7 +25,7 @@ app/                    # App Router 页面
 ├── kanban/             #   排产看板
 ├── orders/             #   订单列表 / 新建 / 编辑
 ├── settings/           #   基础数据（客户/机器/产品/配方）
-├── chat/               #   AI 助手（会话侧栏 + 对话）
+├── page.tsx            #   专用 AI 助手首页与会话
 └── api/auth/           #   NextAuth 路由
 
 components/
@@ -36,11 +33,11 @@ components/
 ├── kanban/             #   看板（dnd-kit 拖拽）
 ├── orders/             #   订单表单
 ├── settings/           #   各基础数据 Tab
-├── chat/               #   ChatInterface（SSE + 确认卡片）
+├── agent/              #   专用会话、草稿、SSE 与确认
 └── ui/                 #   基础组件（button/dialog/input…）
 
 lib/
-├── api.ts              #   API 客户端：统一 fetch + JWT + SSE（postStream）
+├── api.ts              #   API 客户端：统一 fetch + JWT
 └── utils.ts
 
 auth.ts                 # Auth.js 配置（Casdoor OIDC + 服务端 Token 刷新）

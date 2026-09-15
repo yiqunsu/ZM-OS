@@ -1,3 +1,11 @@
+from app.models.agent import (
+    AgentCommand,
+    AgentFileGcJob,
+    AgentRun,
+    AgentToolCall,
+    OrderIntakeItem,
+    SessionEvent,
+)
 from app.models.audit import AgentAuditLog
 from app.models.base import Base
 from app.models.chat import ChatAttachment, ChatMessage, ChatSession
@@ -12,6 +20,12 @@ from app.models.user import User, UserRole
 
 __all__ = [
     "Base",
+    "AgentCommand",
+    "AgentFileGcJob",
+    "AgentRun",
+    "AgentToolCall",
+    "OrderIntakeItem",
+    "SessionEvent",
     "ProductCategory",
     "Product",
     "Pattern",

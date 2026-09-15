@@ -43,12 +43,6 @@ fi
 
 "${SCRIPT_DIR}/verify-casdoor.sh"
 
-if [[ "${AGENT_RUNTIME:-langgraph}" == "openclaw" ]]; then
-  printf 'Starting OpenClaw...\n'
-  compose up -d openclaw
-  wait_for_service_health openclaw 180
-fi
-
 has_existing_schema="$(
   compose exec -T postgres psql \
     --username "${POSTGRES_USER}" \
@@ -72,6 +66,12 @@ compose up -d --remove-orphans backend frontend caddy
 wait_for_service_health backend 180
 wait_for_service_health frontend 180
 wait_for_service_health caddy 60
+if [[ "${AGENT_V2_ENABLED:-true}" == "true" ]]; then
+  compose up -d agent-worker
+  wait_for_service_health agent-worker 90
+else
+  compose stop agent-worker
+fi
 
 compose ps
 compose run --rm backend alembic current

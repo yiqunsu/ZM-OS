@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
 export default auth((req) => {
+  // The Agent proxy returns a JSON 401, including for an expired SSE subscription.
+  if (req.nextUrl.pathname.startsWith("/api/agent/v2/")) return NextResponse.next();
   const isLoggedIn = Boolean(req.auth);
   const isLoginPage = req.nextUrl.pathname.startsWith("/login");
 

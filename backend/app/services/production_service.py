@@ -1,5 +1,7 @@
 """Atomic production-board mutations backed by shared compatibility rules."""
 
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,7 @@ from app.models import (
 from app.models.order import OrderStatus
 from app.models.production import TaskStatus
 from app.services.production_rules import validate_machine_batch
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 _TASK_LOAD_OPTS = (
     selectinload(ProductionTask.orders).selectinload(Order.customer),
@@ -30,10 +33,7 @@ _ORDER_LOAD_OPTS = (selectinload(Order.product).selectinload(Product.category),)
 
 async def _lock_machine(db: AsyncSession, machine_id: str) -> Machine:
     result = await db.execute(
-        select(Machine)
-        .where(Machine.id == machine_id)
-        .with_for_update()
-        .options(*_MACHINE_LOAD_OPTS)
+        select(Machine).where(Machine.id == machine_id).with_for_update().options(*_MACHINE_LOAD_OPTS)
     )
     machine = result.scalar_one_or_none()
     if machine is None:
@@ -123,6 +123,7 @@ def _require_waiting(task: ProductionTask) -> None:
 
 
 async def create_task(db: AsyncSession, machine_id: str, order_ids: list[str]) -> ProductionTask:
+    await lock_scheduling_inputs(db)
     if not machine_id or not order_ids:
         raise HTTPException(400, "machineId 和 orderIds 为必填项")
     if len(order_ids) != len(set(order_ids)):
@@ -164,7 +165,8 @@ async def update_task(
     task_id: str,
     fields: dict,
 ) -> ProductionTask:
-    unsupported = set(fields) - {"status"}
+    await lock_scheduling_inputs(db)
+    unsupported = set(fields) - {"status", "expected_status", "expected_updated_at", "expected_order_ids"}
     if unsupported:
         raise HTTPException(400, "任务队列或订单变更请使用原子看板操作接口")
     status = fields.get("status")
@@ -174,8 +176,17 @@ async def update_task(
     initial = await db.get(ProductionTask, task_id)
     if initial is None:
         raise HTTPException(404, "生产任务不存在")
-    await _lock_machine(db, initial.machine_id)
+    machine = await _lock_machine(db, initial.machine_id)
     task = (await _lock_tasks(db, {task_id}))[task_id]
+    if (
+        fields.get("expected_status") is not None
+        and fields["expected_status"] != task.status
+        or fields.get("expected_updated_at") is not None
+        and fields["expected_updated_at"] != task.updated_at
+        or fields.get("expected_order_ids") is not None
+        and set(fields["expected_order_ids"]) != {order.id for order in task.orders}
+    ):
+        raise HTTPException(409, "生产任务或关联订单已变化，请刷新后重新确认")
 
     if status == task.status:
         await db.commit()
@@ -183,13 +194,17 @@ async def update_task(
         assert loaded is not None
         return loaded
     allowed = {
-        TaskStatus.WAITING: TaskStatus.PRODUCING,
-        TaskStatus.PRODUCING: TaskStatus.DONE,
+        TaskStatus.WAITING: {TaskStatus.PRODUCING},
+        TaskStatus.PRODUCING: {TaskStatus.DONE, TaskStatus.WAITING},
+        TaskStatus.DONE: {TaskStatus.PRODUCING},
     }
-    if allowed.get(task.status) != status:
-        raise HTTPException(409, "生产任务只能按“待生产 → 生产中 → 已完成”顺序流转")
+    if status not in allowed.get(task.status, set()):
+        raise HTTPException(
+            409, "请按“待生产 → 生产中 → 已完成”流转；生产中可撤回待生产，已完成只能恢复生产"
+        )
 
     if status == TaskStatus.PRODUCING:
+        validate_machine_batch(machine, task.orders)
         producing_id = await db.scalar(
             select(ProductionTask.id).where(
                 ProductionTask.machine_id == task.machine_id,
@@ -199,12 +214,13 @@ async def update_task(
         )
         if producing_id is not None:
             raise HTTPException(409, "该机器已有生产中的任务，请先完成当前任务")
-        for order in task.orders:
-            order.status = OrderStatus.PRODUCING
-    else:
-        for order in task.orders:
-            order.status = OrderStatus.DONE
+        if task.status == TaskStatus.DONE:
+            queue = await _active_queue(db, task.machine_id, for_update=True)
+            task.position = max((item.position for item in queue), default=0) + 1
+    for order in task.orders:
+        order.status = OrderStatus.DONE if status == TaskStatus.DONE else OrderStatus.PRODUCING
     task.status = status
+    task.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     loaded = await _get_loaded(db, task_id)
@@ -213,6 +229,7 @@ async def update_task(
 
 
 async def delete_task(db: AsyncSession, task_id: str) -> None:
+    await lock_scheduling_inputs(db)
     initial = await db.get(ProductionTask, task_id)
     if initial is None:
         raise HTTPException(404, "生产任务不存在")
@@ -239,15 +256,14 @@ async def move_order(
     target_task_id: str | None,
     target_machine_id: str | None,
 ) -> None:
+    await lock_scheduling_inputs(db)
     if target_task_id and target_machine_id:
         raise HTTPException(400, "订单只能移动到已有任务或新机器任务中的一种")
     if source_task_id and source_task_id == target_task_id:
         return
 
     task_ids = {item for item in (source_task_id, target_task_id) if item}
-    preview_result = await db.execute(
-        select(ProductionTask).where(ProductionTask.id.in_(task_ids))
-    )
+    preview_result = await db.execute(select(ProductionTask).where(ProductionTask.id.in_(task_ids)))
     previews = {task.id: task for task in preview_result.scalars().all()}
     if set(previews) != task_ids:
         raise HTTPException(404, "生产任务不存在")
@@ -324,6 +340,7 @@ async def move_task(
     target_machine_id: str,
     target_index: int,
 ) -> None:
+    await lock_scheduling_inputs(db)
     initial = await db.get(ProductionTask, task_id)
     if initial is None:
         raise HTTPException(404, "生产任务不存在")
@@ -358,6 +375,7 @@ async def reorder_tasks(
     machine_id: str,
     ordered_task_ids: list[str],
 ) -> None:
+    await lock_scheduling_inputs(db)
     if len(ordered_task_ids) != len(set(ordered_task_ids)):
         raise HTTPException(400, "任务排序中不能包含重复任务")
     await _lock_machine(db, machine_id)

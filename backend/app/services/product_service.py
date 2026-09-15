@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Formula, Order, Product, ProductCategory
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 
 async def list_products(db: AsyncSession) -> list[Product]:
@@ -17,6 +18,7 @@ async def list_products(db: AsyncSession) -> list[Product]:
 
 
 async def create_product(db: AsyncSession, name: str, category_id: str) -> Product:
+    await lock_scheduling_inputs(db)
     if not name.strip() or not category_id:
         raise HTTPException(400, "产品名称和所属大类为必填项")
     product = Product(name=name.strip(), category_id=category_id)
@@ -26,6 +28,7 @@ async def create_product(db: AsyncSession, name: str, category_id: str) -> Produ
 
 
 async def update_product(db: AsyncSession, product_id: str, name: str, category_id: str) -> Product:
+    await lock_scheduling_inputs(db)
     if not name.strip() or not category_id:
         raise HTTPException(400, "产品名称和所属大类为必填项")
     product = await db.get(Product, product_id)
@@ -38,6 +41,7 @@ async def update_product(db: AsyncSession, product_id: str, name: str, category_
 
 
 async def delete_product(db: AsyncSession, product_id: str) -> None:
+    await lock_scheduling_inputs(db)
     order_count = await db.scalar(
         select(func.count()).select_from(Order).where(Order.product_id == product_id)
     )

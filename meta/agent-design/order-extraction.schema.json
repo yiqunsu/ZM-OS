@@ -1,0 +1,414 @@
+{
+  "$defs": {
+    "EntityGuess": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "runner_up_confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Runner Up Confidence",
+          "type": "number"
+        },
+        "evidence": {
+          "maxLength": 300,
+          "minLength": 2,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "confidence",
+        "runner_up_confidence",
+        "evidence",
+        "reason"
+      ],
+      "title": "EntityGuess",
+      "type": "object"
+    },
+    "OrderExtraction": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "customer_match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityGuess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "product_match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityGuess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "product_description": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Product Description"
+        },
+        "width": {
+          "$ref": "#/$defs/Width"
+        },
+        "thickness": {
+          "$ref": "#/$defs/Thickness"
+        },
+        "quantity": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "formula_raw": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Formula Raw"
+        },
+        "source_reference_no": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Reference No"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "customer_name",
+        "product_description",
+        "width",
+        "thickness",
+        "quantity",
+        "formula_raw",
+        "source_reference_no",
+        "notes",
+        "warnings"
+      ],
+      "title": "OrderExtraction",
+      "type": "object"
+    },
+    "Quantity": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1000000000000.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        },
+        "source_text": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Text"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "m",
+                "kg",
+                "g",
+                "t"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "source_text",
+        "unit"
+      ],
+      "title": "Quantity",
+      "type": "object"
+    },
+    "Thickness": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1000000000000.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        },
+        "source_text": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Text"
+        },
+        "unit_source": {
+          "enum": [
+            "EXPLICIT",
+            "INFERRED",
+            "UNKNOWN"
+          ],
+          "title": "Unit Source",
+          "type": "string"
+        },
+        "inference_basis": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Inference Basis"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "μm",
+                "丝"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "source_text",
+        "unit_source",
+        "inference_basis",
+        "unit"
+      ],
+      "title": "Thickness",
+      "type": "object"
+    },
+    "Width": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1000000000000.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        },
+        "source_text": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Text"
+        },
+        "unit_source": {
+          "enum": [
+            "EXPLICIT",
+            "INFERRED",
+            "UNKNOWN"
+          ],
+          "title": "Unit Source",
+          "type": "string"
+        },
+        "inference_basis": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Inference Basis"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "mm",
+                "cm"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "source_text",
+        "unit_source",
+        "inference_basis",
+        "unit"
+      ],
+      "title": "Width",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "orders": {
+      "items": {
+        "$ref": "#/$defs/OrderExtraction"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Orders",
+      "type": "array"
+    },
+    "context_text": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Context Text"
+    }
+  },
+  "required": [
+    "schema_version",
+    "orders"
+  ],
+  "title": "ScreenshotExtraction",
+  "type": "object"
+}

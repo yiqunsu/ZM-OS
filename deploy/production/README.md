@@ -1,21 +1,18 @@
 # FilmOS production deployment
 
-> development 分支默认采用 LangGraph，OpenClaw 改为可选 profile。
-> 发布前先阅读 [development 部署与验收](DEVELOPMENT.md)，并显式配置 `AGENT_RUNTIME=langgraph`。
+> 发布前先阅读 [development 部署与验收](DEVELOPMENT.md)，并配置 `LLM_*` 模型参数。
 
-本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、Casdoor、OpenClaw 和 PostgreSQL 组成；Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
+本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、Casdoor 和 PostgreSQL 组成；Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 
 ICP备案通过前，Caddy 只监听服务器 `127.0.0.1`，必须通过 SSH 隧道访问。备案通过前不要添加公网 DNS，也不要开放公网 80/443。
 
 ## 1. 服务与数据边界
 
 - Caddy 是唯一发布宿主机端口的容器，分别代理 FilmOS 与 Casdoor 两个域名；
-- FastAPI、Next.js、Casdoor、OpenClaw 与 PostgreSQL 没有宿主机端口；
+- FastAPI、Next.js、Casdoor 与 PostgreSQL 没有宿主机端口；
 - FilmOS 与 Casdoor 共用 PostgreSQL 进程，但使用不同数据库和不同登录账号；
-- OpenClaw 只与 FastAPI 共享私有 Agent 网络，不接收 Casdoor Token，也不连接数据库；
 - FilmOS 业务数据存于 `filmos_postgres_data`；Casdoor 账号、角色和应用配置也在该 PostgreSQL 卷的独立数据库中；
 - 聊天图片正文存于后端私有的 `filmos_chat_attachments` 卷，附件元数据仍在 FilmOS 数据库；
-- OpenClaw 的命名卷只保存非权威 Agent 上下文。
 
 ## 2. 服务器准备
 
@@ -45,7 +42,7 @@ nano deploy/production/.env.production
 
 ```bash
 openssl rand -hex 24   # 两个数据库密码
-openssl rand -hex 32   # AUTH_SECRET、OIDC client secret、OpenClaw token
+openssl rand -hex 32   # AUTH_SECRET、OIDC client secret
 openssl rand -hex 16   # OIDC client ID
 openssl rand -base64 32 # 两个 Casdoor 初始账号密码
 ```
@@ -56,7 +53,7 @@ openssl rand -base64 32 # 两个 Casdoor 初始账号密码
 - `CASDOOR_OWNER_NAME`：首个 FilmOS 管理员的 Casdoor 用户名；
 - `CASDOOR_OWNER_EMAIL`：必须与现有 FilmOS OWNER 的邮箱完全一致（忽略大小写），这样首次 OIDC 登录会保留原本的本地用户 ID、订单和 Agent 会话；
 - `CASDOOR_ADMIN_PASSWORD` 与 `CASDOOR_OWNER_PASSWORD`：两个不同的强密码；
-- `QWEN_API_KEY`：OpenClaw 使用的千问 API Key。
+- `LLM_API_KEY`：后端 Agent 使用的模型 API Key。
 
 `NEXT_PUBLIC_API_URL` 是写入前端浏览器 bundle 的构建期 API base，默认同源 `/api`。只有在 API 使用其他公开 origin 时才需要覆盖；修改后必须重新运行部署脚本以重建前端镜像，不能只重启容器。
 
@@ -174,7 +171,6 @@ docker compose --env-file deploy/production/.env.production -f deploy/production
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 casdoor
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 backend
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 frontend
-docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 openclaw
 ```
 
 所有容器使用 `10MB × 3` 的 Docker JSON 日志轮转。不要用 `git reset --hard` 处理服务器上的异常改动。
@@ -249,9 +245,8 @@ CASDOOR_REDIRECT_URI=https://app.zmorder.cn/api/auth/callback/casdoor
 
 ## 10. 不可跨越的边界
 
-- 不公开 PostgreSQL 5432、FastAPI 8000、Next.js 3000、Casdoor 8000 或 OpenClaw 18789；
+- 不公开 PostgreSQL 5432、FastAPI 8000、Next.js 3000、Casdoor 8000；
 - 不把 `.env.production`、`.data/`、Token、密码或证书私钥提交到 Git；
-- 不把 Casdoor Token 发送给 OpenClaw，不把 OpenClaw Gateway Token 发送给前端或 Casdoor；
 - 不为了“未来可能需要”提前加入 Redis；
 - 不在未明确访问控制、保留策略、隐私与成本前把 Phoenix、Sentry 或 Loki 加入生产；
 - 不自动恢复迁移前备份。数据库恢复是破坏性操作，必须人工选择。

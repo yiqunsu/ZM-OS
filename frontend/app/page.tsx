@@ -1,4 +1,6 @@
-import ChatInterface from "@/components/chat/ChatInterface";
+import AgentShell from "@/components/agent/AgentShell";
+
+export const dynamic = "force-dynamic";
 
 export default async function Home({
   searchParams,
@@ -8,10 +10,5 @@ export default async function Home({
   const params = await searchParams;
   const requestedSessionId = typeof params.session === "string" ? params.session : null;
 
-  return (
-    <ChatInterface
-      key={requestedSessionId ?? "new-conversation"}
-      requestedSessionId={requestedSessionId}
-    />
-  );
+  return <AgentShell key={requestedSessionId ?? "agent-home"} requestedSessionId={requestedSessionId} />;
 }

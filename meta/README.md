@@ -4,13 +4,16 @@
 
 ## 文档地图
 
+AI助手重构的开发设计总入口是 [PRD.md](PRD.md)，配套逻辑架构、数据库、接口事件和实施验收文档。它们描述目标能力，不代表当前代码已经实现。这套设计已于2026-09-11确认，作为后续开发依据；已被取代的早期设计文档已移除。实际开发进度见 [实施进度](agent-design/implementation-status.md)，尚未完成的阶段不代表已经实现。
+
 | 文档 | 用途 | 何时阅读 |
 | --- | --- | --- |
+| [PRD.md](PRD.md) | AI助手重构产品需求与配套开发设计总入口 | 开始重构前 |
+| [代码检查（2026-09-13）](agent-design/code-review-2026-09-13.md) | 已修复问题与后续结构优化建议 | 整理 Agent 与工作区代码前 |
 | [GROUND_TRUTH.md](GROUND_TRUTH.md) | 产品边界、领域术语和业务不变量 | 修改业务流程、模型、状态或 API 前 |
 | [ENGINEERING_RULES.md](ENGINEERING_RULES.md) | 前后端、数据库、安全和可维护性规范 | 修改任何代码前按涉及范围阅读 |
 | [TESTING.md](TESTING.md) | 最低验证要求和常用命令 | 开始实现及交付前 |
 | [OBSERVABILITY.md](OBSERVABILITY.md) | 日志、Sentry、Phoenix 与业务审计的职责边界 | 修改可观测性、追踪或部署配置前 |
-| [TRELLIS.md](TRELLIS.md) | Trellis 目录、事实源映射、任务与升级约定 | 使用或维护 Trellis 工作流前 |
 | [decisions/](decisions/) | 重要决策的背景、选择和后果 | 改变架构或长期约定前 |
 
 ## 规则强度

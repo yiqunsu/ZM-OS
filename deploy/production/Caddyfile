@@ -26,6 +26,13 @@
 	}
 
 	@backend_api path /api /api/*
+	@agent_workspace path /api/agent/v2/*
+	handle @agent_workspace {
+		reverse_proxy frontend:3000 {
+			flush_interval -1
+		}
+	}
+
 	handle @backend_api {
 		reverse_proxy backend:8000 {
 			flush_interval -1

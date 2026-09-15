@@ -2,11 +2,17 @@
 
 ## 运行配置
 
-- `AGENT_RUNTIME=langgraph`，设置有效的 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
+- LangGraph，设置有效的 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
 - 订单图片提取使用 `LLM_VISION_MODEL` 的现有默认值。
-- 默认不启动 OpenClaw；仍需回退时，显式设置 `AGENT_RUNTIME=openclaw` 并启用 `--profile openclaw`，配置旧 Gateway 和 QWEN 凭证。
 - LangGraph Prompt：`backend/app/agent/prompt_templates/scheduling-v1.md`。修改后重建后端镜像。
-- 本次无数据库结构变更。上线仍需按原流程执行迁移、备份并检查模型配置。
+- 回复卡片新增 `chat_messages.presentation` 可空 JSONB 字段（迁移 `c9d8e7f60123`）。上线先备份并执行 `alembic upgrade head`，再启动新后端；旧消息保持文本展示。
+
+## Agent 回复展示
+
+- 模型只输出解释文字；`schemas/agent_presentation.py` 从真实工具结果生成版本化只读卡片，不解析模型 JSON 或执行模型 HTML。
+- `SchedulingAdapter` 收集卡片，runner 随助手消息持久化，并通过 SSE `text_done.presentation` 发送；历史 API 使用同一契约。
+- 前端 `AgentReply.tsx` 负责文字排版和卡片展示。未知卡片版本退回文字。卡片是回复时快照，不是实时看板或执行凭证。
+- 新能力可扩展契约与对应展示组件；左侧不增加业务写入入口，右侧继续统一调整与确认。
 
 ## 发布方式
 

@@ -1,10 +1,7 @@
 # FilmOS (ZM-OS)
 
-> **development 分支**：正在采用受限 LangGraph 排单助手与右侧草案看板。
-> 默认 `AGENT_RUNTIME=langgraph`，模型只有查询和生成草案工具，执行在右侧明确确认。
-> 本分支的运行与发布说明见 [开发部署说明](deploy/production/DEVELOPMENT.md)，
-> 新架构决策见 [ADR 0009](meta/decisions/0009-langgraph-scheduling-workspace.md)。
-> 下文 OpenClaw 主路径描述属于此前架构；在本分支 OpenClaw 仅为显式可选路径。
+> **development 分支**：AI助手重构设计已确认，开发依据见 [PRD](meta/PRD.md) 与 [ADR 0010](meta/decisions/0010-specialized-agent-sessions-and-durable-runs.md)。
+> 下文介绍当前实现，不代表目标架构已落地；运行与发布说明见 [开发部署说明](deploy/production/DEVELOPMENT.md)。
 
 塑料薄膜工厂的订单管理系统：把「微信收单 → 手工录 Excel → 白板排产」的流程，替换成一套带 AI 助手的 Web 系统——对话式录单、看板式排产、生产任务跟踪。
 
@@ -28,11 +25,10 @@ flowchart LR
         S["Service 层"]
         AR["Agent runtime adapter"]
     end
-    OC["OpenClaw<br/>私有 Agent 容器"]
     CD["Casdoor<br/>OIDC + 用户角色"]
     PG[("PostgreSQL<br/>业务/聊天历史/审计")]
     QW["千问<br/>OpenAI-compatible API"]
-    LG["LangGraph<br/>临时回退运行时"]
+    LG["LangGraph<br/>受限排单循环"]
     PX["Phoenix<br/>可选 Trace UI"]
 
     UI -->|"REST + Bearer JWT"| MW
@@ -40,8 +36,8 @@ flowchart LR
     UI -->|OIDC 跳转| CD
     CD -->|RS256 access token| NA --> UI
     MW --> R --> S --> PG
-    R --> AR -->|"私有网络 + Token"| OC --> QW
-    AR -.->|"AGENT_RUNTIME=langgraph"| LG --> PG
+    R --> AR --> LG --> QW
+    LG -->|受限能力接口| S
     LG -.->|"OpenInference / OTLP"| PX
 ```
 
@@ -51,7 +47,7 @@ flowchart LR
 - **后端是唯一业务入口**：REST API + Agent 适配层，统一完成鉴权、用户会话隔离、PostgreSQL 历史持久化和 SSE 流式返回。
 - **Casdoor 负责生产登录**：Auth.js 完成 OIDC code flow 和 Token 刷新，FastAPI 通过 JWKS 验证短期 RS256 access token，并把身份映射到稳定的本地用户 ID。
 - **FastAPI 负责授权**：`OWNER` 与 `OPERATOR` 都可管理订单、生产任务和自己的 Agent 会话；只有 `OWNER` 可修改基础数据。
-- **OpenClaw** 是当前首选 Agent 运行时，单独容器化且不直连业务数据库；第一版只支持文本对话。LangGraph 暂时保留为回退路径，其业务工具尚未迁移到 OpenClaw。
+- **Agent** 在 FastAPI 进程内运行：录单由受控提取服务生成表单，排单由 LangGraph 调用只读与草案工具；业务写入必须明确确认。
 - **PostgreSQL** 存业务数据、聊天历史和审计日志；Redis 目前不是核心依赖，只在本地 Compose 保留。
 - **Phoenix** 通过 OpenInference/OpenTelemetry 接收 Agent Trace，用于查看模型、图节点和工具调用；它是可关闭的观测旁路，不参与业务事务。
 
@@ -65,11 +61,9 @@ flowchart LR
 .
 ├── frontend/            # Next.js 前端（UI 层）——详见 frontend/README.md
 ├── backend/             # FastAPI 后端（业务 + AI Agent）——详见 backend/README.md
-├── openclaw/            # OpenClaw 配置、只读 workspace 与连通性测试
 ├── deploy/production/   # 腾讯云单机 Compose、发布与备份脚本
 ├── docker-compose.yml   # 本地/staging 编排：frontend + backend + postgres + redis + phoenix
 ├── meta/                # Ground Truth、工程规范、测试要求和架构决策
-├── .trellis/            # Agent 任务、分层 spec、会话记忆与工作流
 └── .github/workflows/   # CI：backend-ci（lint+test+build）、frontend-ci（lint+typecheck+build）
 ```
 
@@ -77,7 +71,7 @@ flowchart LR
 
 - 前端细节 → [frontend/README.md](frontend/README.md)
 - 后端细节 → [backend/README.md](backend/README.md)
-- 项目规范与 Trellis 约定 → [meta/README.md](meta/README.md)
+- 项目规范 → [meta/README.md](meta/README.md)
 
 ---
 
@@ -90,7 +84,7 @@ flowchart LR
 | -------- | --------------------------------------------------------------- |
 | 前端       | Next.js (App Router) · React · TypeScript · Tailwind · Auth.js |
 | 后端       | FastAPI · SQLAlchemy 2.0 (async) · Alembic · Pydantic           |
-| AI Agent | OpenClaw · LangGraph（回退）· OpenAI-compatible API（默认千问）        |
+| AI Agent | LangGraph· OpenAI-compatible API（默认千问）        |
 | Agent 可观测性 | OpenInference · OpenTelemetry · Arize Phoenix |
 | 身份       | Casdoor · OIDC · RS256/JWKS                                    |
 | 数据库      | PostgreSQL · Redis（仅本地可选）                                  |
@@ -130,7 +124,7 @@ Docker Compose 默认启用 Phoenix。发起一次 AI 对话后，可打开 http
 
 以下能力代码已接好，但需要你提供凭证才生效（不提供也不影响其余功能）：
 
-- **AI Agent 对话**：按 [openclaw/README.md](openclaw/README.md) 创建 `openclaw/.env`；旧 LangGraph 回退路径继续读取 `backend/.env` 的 `LLM_*`
+- **AI Agent 对话**：在 `backend/.env` 配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`；图片识别使用 `LLM_VISION_MODEL`。
 - **错误追踪（可选）**：设 `SENTRY_DSN` 启用 Sentry
 
 ### Phoenix 安全说明
@@ -141,7 +135,7 @@ Docker Compose 默认启用 Phoenix。发起一次 AI 对话后，可打开 http
 
 ## 生产部署
 
-根目录 `docker-compose.yml` 仅用于本地开发，不应直接部署到公网。腾讯云轻量服务器使用独立生产栈，包含 PostgreSQL、Casdoor、FastAPI、Next.js、OpenClaw 与 Caddy。Casdoor 使用独立数据库和数据库账号；初期不包含 Redis、Phoenix、Sentry 或 COS。ICP备案通过前只允许 SSH 隧道访问。
+根目录 `docker-compose.yml` 仅用于本地开发，不应直接部署到公网。腾讯云轻量服务器使用独立生产栈，包含 PostgreSQL、Casdoor、FastAPI、Next.js与 Caddy。Casdoor 使用独立数据库和数据库账号；初期不包含 Redis、Phoenix、Sentry 或 COS。ICP备案通过前只允许 SSH 隧道访问。
 
 完整安装、更新、备份、恢复、回滚和备案后启用 HTTPS 的步骤见 [deploy/production/README.md](deploy/production/README.md)。
 

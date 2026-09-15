@@ -41,7 +41,7 @@ services:
     image: filmos-backend:production
     restart: unless-stopped
     init: true
-    environment:
+    environment: &backend-environment
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ENVIRONMENT: production
       AUTH_PROVIDER: casdoor
@@ -50,14 +50,12 @@ services:
       CASDOOR_JWKS_URL: http://casdoor:8000/.well-known/jwks
       CASDOOR_ORGANIZATION: filmos
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      AGENT_RUNTIME: ${AGENT_RUNTIME:-langgraph}
-      OPENCLAW_BASE_URL: http://openclaw:18789
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
-      OPENCLAW_AGENT_ID: filmos-web
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen3.7-plus}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-qwen3-vl-plus}
       CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
       PHOENIX_ENABLED: "false"
       SENTRY_DSN: ""
     volumes:
@@ -70,7 +68,6 @@ services:
     networks:
       - application
       - database
-      - agent
     healthcheck:
       test:
         [
@@ -83,6 +80,33 @@ services:
       timeout: 5s
       retries: 8
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.5
+    logging: *default-logging
+
+  agent-worker:
+    image: filmos-backend:production
+    command: [python, -m, app.agent.worker]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 190s
+    healthcheck:
+      test: [CMD, python, -m, app.agent.worker, --healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment: *backend-environment
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
     security_opt:
       - no-new-privileges:true
     mem_limit: 768m
@@ -116,52 +140,6 @@ services:
     cpus: 0.75
     logging: *default-logging
 
-  openclaw:
-    profiles: [openclaw]
-    image: ghcr.io/openclaw/openclaw:2026.7.1-slim@sha256:6a31d44b2944e7adcd2b582bf6fb463111264ebca97a0201795b799135bd102c
-    restart: unless-stopped
-    init: true
-    environment:
-      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
-      OPENCLAW_STATE_DIR: /home/node/.openclaw
-      OPENCLAW_WORKSPACE_DIR: /workspace
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
-      OPENCLAW_DISABLE_BONJOUR: "1"
-      LLM_API_KEY: ${QWEN_API_KEY:-}
-      LLM_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      LLM_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
-    command:
-      [
-        "sh",
-        "-lc",
-        "cp /etc/openclaw/openclaw.seed.json /home/node/.openclaw/openclaw.json && chmod 600 /home/node/.openclaw/openclaw.json && exec node openclaw.mjs gateway --bind lan --port 18789",
-      ]
-    volumes:
-      - ../../openclaw/config/openclaw.json:/etc/openclaw/openclaw.seed.json:ro
-      - ../../openclaw/workspace:/workspace:ro
-      - openclaw_state:/home/node/.openclaw
-    networks:
-      openclaw_egress:
-        gw_priority: 1
-      agent:
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:18789/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 8
-      start_period: 30s
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: 640m
-    cpus: 0.75
-    logging: *default-logging
-
   frontend:
     build:
       context: ../../frontend
@@ -175,6 +153,7 @@ services:
     init: true
     environment:
       NODE_ENV: production
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env.production}
       NEXTAUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env.production}
       AUTH_URL: ${NEXTAUTH_URL:?Set NEXTAUTH_URL in .env.production}
@@ -259,9 +238,6 @@ networks:
   application:
   database:
     internal: true
-  agent:
-    internal: true
-  openclaw_egress:
 
 volumes:
   postgres_data:
@@ -270,7 +246,5 @@ volumes:
     name: filmos_caddy_data
   caddy_config:
     name: filmos_caddy_config
-  openclaw_state:
-    name: filmos_openclaw_state
   chat_attachments:
     name: filmos_chat_attachments

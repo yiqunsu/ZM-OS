@@ -99,29 +99,10 @@ case "${WECHAT_LOGIN_ENABLED:-false}" in
     ;;
 esac
 
-case "${AGENT_RUNTIME:-langgraph}" in
-  openclaw)
-    [[ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]] \
-      || die "OPENCLAW_GATEWAY_TOKEN must be set when AGENT_RUNTIME=openclaw"
-    [[ "${OPENCLAW_GATEWAY_TOKEN}" != *CHANGE_ME* ]] \
-      || die "OPENCLAW_GATEWAY_TOKEN still contains a CHANGE_ME placeholder"
-    (( ${#OPENCLAW_GATEWAY_TOKEN} >= 64 )) \
-      || die "OPENCLAW_GATEWAY_TOKEN must contain at least 64 characters; use: openssl rand -hex 32"
-    [[ -n "${QWEN_API_KEY:-}" ]] \
-      || die "QWEN_API_KEY must be set when AGENT_RUNTIME=openclaw"
-    [[ "${QWEN_API_KEY}" != *CHANGE_ME* ]] \
-      || die "QWEN_API_KEY still contains a CHANGE_ME placeholder"
-    ;;
-  langgraph)
-    [[ -n "${LLM_API_KEY:-}" ]] \
-      || die "LLM_API_KEY must be set when AGENT_RUNTIME=langgraph"
-    [[ "${LLM_API_KEY}" != *CHANGE_ME* ]] \
-      || die "LLM_API_KEY still contains a CHANGE_ME placeholder"
-    ;;
-  *)
-    die "AGENT_RUNTIME must be openclaw or langgraph"
-    ;;
-esac
+[[ -n "${LLM_API_KEY:-}" ]] || die "LLM_API_KEY must be set"
+[[ "${AGENT_V2_ENABLED:-false}" == "true" || "${AGENT_V2_ENABLED:-false}" == "false" ]] || die "AGENT_V2_ENABLED must be true or false"
+[[ "${LLM_API_KEY}" != *CHANGE_ME* ]] || die "LLM_API_KEY still contains a CHANGE_ME placeholder"
+
 
 case "${WEB_BIND_IP}" in
   127.0.0.1)

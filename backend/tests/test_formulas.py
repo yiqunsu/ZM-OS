@@ -10,7 +10,8 @@ async def test_delete_formula_blocked_when_order_references_it(client):
     })).json()
     cust = (await client.post("/api/customers", json={"company": "华兴包装", "contact": "张三"})).json()
     await client.post("/api/orders", json={
-        "customer_id": cust["id"], "product_id": prod["id"], "spec_params": {}, "quantity": 100, "unit": "kg",
+        "customer_id": cust["id"], "product_id": prod["id"],
+        "spec_params": {"宽幅": "400mm", "厚度": "50μm"}, "quantity": 100, "unit": "kg",
         "formula_id": formula["id"],
     })
 

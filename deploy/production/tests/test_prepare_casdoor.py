@@ -203,9 +203,7 @@ class ValidateEnvironmentTests(unittest.TestCase):
             "CASDOOR_OWNER_NAME": "owner",
             "CASDOOR_OWNER_EMAIL": "owner@zmorder.cn",
             "CASDOOR_OWNER_PASSWORD": "g" * 24,
-            "AGENT_RUNTIME": "openclaw",
-            "OPENCLAW_GATEWAY_TOKEN": "h" * 64,
-            "QWEN_API_KEY": "qwen-test-key",
+            "LLM_API_KEY": "model-test-key",
             "WECHAT_LOGIN_ENABLED": wechat_enabled,
             "WECHAT_OPEN_APP_ID": "wx0123456789abcdef",
             "WECHAT_OPEN_APP_SECRET": (

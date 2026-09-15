@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "orders": [
+    {
+      "schema_version": 2,
+      "customer_name": null,
+      "product_description": "外黑环保料",
+      "width": {
+        "value": 42.5,
+        "unit": "cm",
+        "source_text": "42.5",
+        "unit_source": "INFERRED",
+        "inference_basis": "基于当前产品及聊天上下文推测"
+      },
+      "thickness": {
+        "value": 11.8,
+        "unit": "丝",
+        "source_text": "11.8丝",
+        "unit_source": "EXPLICIT",
+        "inference_basis": null
+      },
+      "quantity": {
+        "value": 7500,
+        "unit": "m",
+        "source_text": "7500米不要多-包含损耗"
+      },
+      "formula_raw": null,
+      "source_reference_no": null,
+      "notes": "不要多，包含损耗",
+      "warnings": [],
+      "customer_match": null,
+      "product_match": null
+    }
+  ],
+  "context_text": "群名：协茂～瑞豪一部；发送者：瑞豪跟单"
+}

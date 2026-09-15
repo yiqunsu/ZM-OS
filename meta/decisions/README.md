@@ -50,8 +50,8 @@ NNNN-short-kebab-case-title.md
 | [0002](0002-postgresql-as-system-of-record.md) | PostgreSQL 作为业务数据权威来源 | Accepted |
 | [0003](0003-snapshot-formula-on-order.md) | 订单保存配方快照 | Accepted |
 | [0004](0004-use-phoenix-for-agent-observability.md) | 使用 Phoenix 观测 AI Agent Trace | Accepted |
-| [0005](0005-adopt-trellis-for-agent-workflow.md) | 采用 Trellis 管理 Agent 任务、spec 与会话记忆 | Accepted |
 | [0006](0006-single-host-production-deployment.md) | 采用单机 Docker Compose 生产部署 | Accepted |
 | [0007](0007-casdoor-oidc-and-fastapi-rbac.md) | 采用 Casdoor OIDC 与 FastAPI RBAC | Accepted |
 | [0008](0008-store-chat-attachments-on-private-volume.md) | 聊天附件使用后端私有持久卷 | Accepted |
-| [0009](0009-langgraph-scheduling-workspace.md) | 受限 LangGraph 排单助手与草案看板 | Accepted |
+| [0009](0009-langgraph-scheduling-workspace.md) | 受限 LangGraph 排单助手与草案看板 | Superseded by 0010 |
+| [0010](0010-specialized-agent-sessions-and-durable-runs.md) | 专用Agent会话与持久Run执行架构 | Accepted |

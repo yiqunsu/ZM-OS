@@ -11,8 +11,8 @@ frontend/.next/
 .env.local
 deploy/production/.env.production
 deploy/local-auth/.env.local-auth
-openclaw/.env
-openclaw/state/
+**/.env
+
 
 # Production runtime data
 .data/

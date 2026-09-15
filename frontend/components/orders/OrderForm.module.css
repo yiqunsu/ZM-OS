@@ -1,0 +1,117 @@
+/* The workspace uses the same fields at a denser, readable size. */
+.compact > fieldset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.compact > fieldset > * {
+  margin: 0;
+  min-width: 0;
+}
+.compact [data-order-section="基本信息"],
+.compact [data-order-section="规格参数"] {
+  grid-column: 1 / -1;
+}
+.compact [data-section-header] {
+  padding: 5px 12px;
+}
+.compact [data-section-header] h2 {
+  font-size: 12px;
+  line-height: 16px;
+}
+.compact [data-section-body] {
+  padding: 8px 12px;
+}
+.compact label,
+.compact select,
+.compact input,
+.compact textarea {
+  font-size: 12px;
+}
+.compact select,
+.compact input:not([type="radio"]) {
+  height: 32px;
+}
+.compact [title="新建客户"],
+.compact [title="新建产品"] {
+  width: 32px;
+  height: 32px;
+}
+.compact [data-order-section="基本信息"] [data-section-body] > div {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.compact [data-order-specs] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px;
+}
+.compact [data-order-specs] > * {
+  margin: 0;
+  min-width: 0;
+}
+.compact [data-order-specs] > :nth-child(n + 3) {
+  grid-column: 1 / -1;
+}
+.compact [data-order-specs] > div > :first-child {
+  margin-bottom: 5px;
+}
+.compact [data-order-specs] > div > input {
+  margin: 0;
+}
+.compact [data-order-specs] p {
+  font-size: 10px;
+  line-height: 14px;
+}
+.compact [aria-label^="固定单位"],
+.compact [role="radiogroup"] label > span {
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 14px;
+}
+.compact [data-order-section="配方"] [data-section-body] > :first-child {
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.compact [data-order-section="配方"] [data-section-body] > div > div {
+  margin-top: 6px;
+}
+.compact [data-order-section="配方"] label span {
+  font-size: 12px;
+}
+.compact [data-order-section="配方"] p {
+  font-size: 11px;
+  line-height: 16px;
+}
+.compact textarea {
+  field-sizing: fixed;
+  resize: none;
+  min-height: 48px;
+  height: 64px;
+}
+.compact [data-order-section="额外要求"] textarea {
+  height: 100px;
+}
+@container (max-width: 400px) {
+  .compact > fieldset {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compact [data-order-section] {
+    grid-column: 1 / -1;
+  }
+}
+
+.compact [data-formula-selection] {
+  display: grid;
+  gap: 6px;
+}
+.compact [data-order-section="配方"] [data-formula-selection] > div {
+  margin: 0;
+}
+.compact [data-formula-selection] > div:first-child > label {
+  display: none;
+}
+.compact [data-formula-selection] textarea {
+  min-height: 36px;
+  height: 36px;
+}

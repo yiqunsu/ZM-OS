@@ -60,6 +60,7 @@ async def get_kanban(db: AsyncSession) -> KanbanOut:
                     machine_id=t.machine_id,
                     position=t.position,
                     status=t.status,
+                    updated_at=t.updated_at,
                     notes=t.notes,
                     orders=[OrderSummary.model_validate(o) for o in t.orders],
                 )

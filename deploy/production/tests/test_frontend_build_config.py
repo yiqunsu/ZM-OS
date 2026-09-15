@@ -20,7 +20,7 @@ def render_compose(
 ) -> dict[str, object]:
     environment = os.environ.copy()
     environment.pop("NEXT_PUBLIC_API_URL", None)
-    environment["QWEN_API_KEY"] = "compose-render-test-key"
+    environment["LLM_API_KEY"] = "compose-render-test-key"
     if api_url is not None:
         environment["NEXT_PUBLIC_API_URL"] = api_url
 

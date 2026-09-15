@@ -9,10 +9,13 @@ import {
 import { api } from "@/lib/api";
 import type { KanbanOrder } from "./types";
 
+import { orderDisplayStatus, ORDER_STATUS_LABEL as STATUS_LABEL, ORDER_STATUS_STYLE as STATUS_STYLE, type OrderStatus, type OrderDisplayStatus } from "@/lib/order-status";
+
 interface FullOrder {
+  task?: { status: Exclude<OrderDisplayStatus, "PENDING"> } | null;
   id:               string;
   order_no:         string;
-  status:           string;
+  status:           OrderStatus;
   quantity:         number;
   unit:             string;
   spec_params:      Record<string, string>;
@@ -24,23 +27,15 @@ interface FullOrder {
   formula:  { id: string; name: string; materials: string } | null;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  PENDING:   "待排单",
-  PRODUCING: "生产中",
-  DONE:      "已完成",
-};
-const STATUS_STYLE: Record<string, string> = {
-  PENDING:   "bg-amber-50 text-amber-600 border-amber-200",
-  PRODUCING: "bg-blue-50 text-blue-600 border-blue-200",
-  DONE:      "bg-green-50 text-green-600 border-green-200",
-};
+
 
 interface Props {
   order: KanbanOrder;
   overlay?: boolean;
+  dragDisabled?: boolean;
 }
 
-export default function OrderCard({ order, overlay = false }: Props) {
+export default function OrderCard({ order, overlay = false, dragDisabled = false }: Props) {
   const [detailOpen,    setDetailOpen]    = useState(false);
   const [fullOrder,     setFullOrder]     = useState<FullOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -52,7 +47,7 @@ export default function OrderCard({ order, overlay = false }: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id:   order.id,
     data: { type: "order" },
-    disabled: overlay,
+    disabled: overlay || dragDisabled,
   });
 
   const style = {
@@ -64,11 +59,9 @@ export default function OrderCard({ order, overlay = false }: Props) {
 
   async function openDetail() {
     setDetailOpen(true);
-    if (!fullOrder) {
-      setDetailLoading(true);
-      setFullOrder(await api.get<FullOrder>(`/orders/${order.id}`));
-      setDetailLoading(false);
-    }
+    setDetailLoading(true);
+    setFullOrder(await api.get<FullOrder>(`/orders/${order.id}`));
+    setDetailLoading(false);
   }
 
   /* Wrap DnD's onPointerDown so we can track movement without breaking drag */
@@ -172,8 +165,8 @@ export default function OrderCard({ order, overlay = false }: Props) {
                 {order.order_no}
               </span>
               {fullOrder && (
-                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[fullOrder.status]}`}>
-                  {STATUS_LABEL[fullOrder.status]}
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[orderDisplayStatus(fullOrder)]}`}>
+                  {STATUS_LABEL[orderDisplayStatus(fullOrder)]}
                 </span>
               )}
             </DialogTitle>

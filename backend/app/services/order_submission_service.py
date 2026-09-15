@@ -1,5 +1,6 @@
 """Atomic submission of the collaborative order workspace."""
 
+import math
 from typing import Any
 
 from fastapi import HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Customer, Formula, Order, Product
 from app.services import order_service
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 
 def _quantity(value: Any) -> float:
@@ -14,12 +16,13 @@ def _quantity(value: Any) -> float:
         quantity = float(value)
     except (TypeError, ValueError) as err:
         raise HTTPException(409, "订单草稿缺少有效数量，请在右侧表单补充") from err
-    if quantity <= 0:
+    if not math.isfinite(quantity) or quantity <= 0:
         raise HTTPException(409, "订单草稿缺少有效数量，请在右侧表单补充")
     return quantity
 
 
 async def create_from_workspace_draft(db: AsyncSession, draft: dict[str, Any]) -> Order:
+    await lock_scheduling_inputs(db)
     customer_id = str(draft.get("customer_id") or "")
     product_id = str(draft.get("product_id") or "")
     if not customer_id or await db.get(Customer, customer_id) is None:
@@ -30,8 +33,8 @@ async def create_from_workspace_draft(db: AsyncSession, draft: dict[str, Any]) -
     raw_specs = draft.get("spec_params")
     spec_params = raw_specs if isinstance(raw_specs, dict) else {}
     unit = str(draft.get("unit") or "kg")
-    if unit not in {"kg", "t"}:
-        raise HTTPException(409, "订单单位仅支持 kg 或 t")
+    if unit not in {"m", "g", "kg", "t", "cm", "mm"}:
+        raise HTTPException(409, "订单单位仅支持 m、g、kg 或历史单位 t")
 
     formula_id = str(draft.get("formula_id") or "") or None
     mode = str(draft.get("formula_mode") or "none")

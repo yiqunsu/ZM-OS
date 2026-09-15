@@ -1,12 +1,14 @@
 # 0009 受限 LangGraph 排单助手与草案看板
 
-状态：Accepted
+状态：Superseded by 0010
+
+本文件仅记录历史决策，不再作为新开发依据。现行决策见 [0010](0010-specialized-agent-sessions-and-durable-runs.md)。
 
 日期：2026-09-08
 
 ## 决策
 
-development 分支以轻量 LangGraph 排单助手为主运行时。Agent 负责理解、查询、生成草案和解释，生产规则仍由 FastAPI Service 执行。OpenClaw 保留为显式可选运行时，不参与默认部署。
+development 分支以轻量 LangGraph 排单助手为主运行时。Agent 负责理解、查询、生成草案和解释，生产规则仍由 FastAPI Service 执行。排单运行时统一为进程内 LangGraph。
 
 首期交互是：对话生成草案 → 右侧看板人工调整 → 明确确认后执行。实际队列只读展示并轮询刷新；草案编辑不修改生产任务。确认必须绑定草案内容版本，后台变化或另一个页面编辑后应拒绝旧确认。
 
