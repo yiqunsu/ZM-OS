@@ -1,4 +1,5 @@
 "use client";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -207,7 +208,7 @@ export default function FormulaTab() {
       await api.delete(`/formulas/${deleting.id}`);
       setDeleteDialogOpen(false); setDeleting(null); await load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "删除失败");
+      throw new Error(e instanceof ApiError ? e.message : "删除失败，请重试");
     }
   }
 
@@ -510,18 +511,9 @@ export default function FormulaTab() {
       </Dialog>
 
       {/* ── 删除确认 ── */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="text-slate-800">确认删除</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500 py-2">
-            确定删除配方「<span className="font-medium text-slate-700">{deleting?.name}</span>」吗？若已被订单引用则无法删除。
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="border-slate-200 text-slate-600">取消</Button>
-            <Button onClick={handleDelete} className="bg-red-500 hover:bg-red-600 text-white border-0">删除</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog open={deleteDialogOpen} title="删除配方？"
+        description={`将删除「${deleting?.name ?? ""}」，此操作无法撤销。已被订单引用的配方无法删除。`}
+        onCancel={() => setDeleteDialogOpen(false)} onConfirm={handleDelete} />
     </div>
   );
 }

@@ -17,7 +17,7 @@ async def test_create_order_generates_order_no_and_increments(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {},
+                "spec_params": {"宽幅": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
             },
@@ -29,7 +29,7 @@ async def test_create_order_generates_order_no_and_increments(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {},
+                "spec_params": {"宽幅": "400mm", "厚度": "50μm"},
                 "quantity": 200,
                 "unit": "kg",
             },
@@ -49,7 +49,7 @@ async def test_order_no_is_not_reused_after_delete(client):
     payload = {
         "customer_id": cust["id"],
         "product_id": prod["id"],
-        "spec_params": {},
+        "spec_params": {"宽幅": "400mm", "厚度": "50μm"},
         "quantity": 100,
         "unit": "kg",
     }
@@ -82,7 +82,7 @@ async def test_create_order_snapshots_formula(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {},
+                "spec_params": {"宽幅": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
                 "formula_id": formula["id"],
@@ -177,7 +177,7 @@ async def test_assigned_order_cannot_bypass_production_flow(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {"宽度": "400mm"},
+                "spec_params": {"宽度": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
             },

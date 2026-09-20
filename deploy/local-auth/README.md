@@ -11,8 +11,7 @@ This overlay exists only for exercising the production-style OIDC and RBAC flow.
    `http://127.0.0.1:8001`.
 
 The overlay creates a separate PostgreSQL role and database. Casdoor joins only
-the `local_auth_application` and `local_auth_database` networks; OpenClaw joins
-neither. PostgreSQL is never reachable from browser code.
+the `local_auth_application` and `local_auth_database` networks. PostgreSQL is never reachable from browser code.
 
 The merged frontend build keeps the default browser API base at
 `http://localhost:8000/api`. To use another public API base, set

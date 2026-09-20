@@ -14,8 +14,8 @@ class OrderCreate(BaseModel):
     customer_id: str = Field(min_length=1)
     product_id: str = Field(min_length=1)
     spec_params: dict[str, str] = Field(default_factory=dict)
-    quantity: float = Field(gt=0)
-    unit: Literal["kg", "t"]
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    unit: Literal["m", "g", "kg", "t", "cm", "mm"]
     formula_id: str | None = None
     extra_notes: str | None = None
 
@@ -25,7 +25,7 @@ class OrderDraftCreate(BaseModel):
     product_id: str = Field(default="", max_length=128)
     spec_params: dict[str, str] = Field(default_factory=dict)
     quantity: str | float = ""
-    unit: Literal["kg", "t"] = "kg"
+    unit: Literal["m", "g", "kg", "t", "cm", "mm"] = "kg"
     formula_mode: Literal["none", "existing", "new"] = "none"
     formula_id: str = Field(default="", max_length=128)
     formula_materials: str = Field(default="", max_length=10000)
@@ -38,8 +38,8 @@ class OrderUpdate(BaseModel):
     customer_id: str | None = None
     product_id: str | None = None
     spec_params: dict[str, str] | None = None
-    quantity: float | None = Field(default=None, gt=0)
-    unit: Literal["kg", "t"] | None = None
+    quantity: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    unit: Literal["m", "g", "kg", "t", "cm", "mm"] | None = None
     formula_id: str | None = None
     extra_notes: str | None = None
     status: OrderStatus | None = None

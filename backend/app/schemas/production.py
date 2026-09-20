@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.order import OrderStatus
@@ -11,6 +13,7 @@ class TaskRef(BaseModel):
 
     id: str
     status: TaskStatus
+    updated_at: datetime
 
 
 class OrderSummary(BaseModel):
@@ -34,6 +37,9 @@ class ProductionTaskCreate(BaseModel):
 
 
 class ProductionTaskUpdate(BaseModel):
+    expected_status: TaskStatus | None = None
+    expected_updated_at: datetime | None = None
+    expected_order_ids: list[str] | None = None
     status: TaskStatus | None = None
     position: int | None = None
     machine_id: str | None = None
@@ -65,5 +71,6 @@ class ProductionTaskOut(BaseModel):
     machine_id: str
     position: int
     status: TaskStatus
+    updated_at: datetime
     notes: str | None = None
     orders: list[OrderSummary]

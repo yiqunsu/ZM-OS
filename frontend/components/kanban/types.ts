@@ -16,6 +16,7 @@ export interface KanbanOrder {
 export type TaskStatus = "WAITING" | "PRODUCING" | "DONE";
 
 export interface KanbanTask {
+  updated_at?: string;
   id:         string;
   machine_id: string;
   position:   number;
@@ -55,5 +56,5 @@ export const TASK_STATUS_STYLE: Record<TaskStatus, string> = {
 export const TASK_STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   WAITING:   "PRODUCING",
   PRODUCING: "DONE",
-  DONE:      "WAITING",
+  DONE:      "PRODUCING",
 };

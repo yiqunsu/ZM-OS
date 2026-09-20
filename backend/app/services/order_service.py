@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Customer, Formula, Order, Product
 from app.models.order import OrderStatus, order_number_sequence
+from app.services.order_specification import standard_quantity, validate_specification
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 _LOAD_OPTS = (
     selectinload(Order.customer),
@@ -85,12 +88,17 @@ async def create_order_record(
     extra_notes: str | None,
 ) -> Order:
     """Build and flush an order without committing the surrounding use case."""
+    await lock_scheduling_inputs(db)
     if not customer_id or not product_id or quantity is None or not unit:
         raise HTTPException(400, "客户、产品、数量和单位为必填项")
-    if quantity <= 0:
+    if not math.isfinite(quantity) or quantity <= 0:
         raise HTTPException(400, "订单数量必须大于零")
-    if unit not in {"kg", "t"}:
-        raise HTTPException(400, "订单单位仅支持 kg 或 t")
+    if unit not in {"m", "g", "kg", "t", "cm", "mm"}:
+        raise HTTPException(400, "订单单位仅支持 m、g、kg 或历史单位 t")
+    spec_params = validate_specification(spec_params)
+    if unit not in {"m", "kg"}:
+        extra_notes = "；".join(filter(None, [extra_notes, f"原始数量：{quantity:g}{unit}"]))
+    quantity, unit = standard_quantity(quantity, unit)
     if await db.get(Customer, customer_id) is None:
         raise HTTPException(400, "客户不存在")
     if await db.get(Product, product_id) is None:
@@ -117,6 +125,7 @@ async def create_order_record(
 
 
 async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) -> Order:
+    await lock_scheduling_inputs(db)
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "订单不存在")
@@ -127,9 +136,7 @@ async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) 
 
     if "formula_id" in fields:
         target_product_id = fields.get("product_id", order.product_id)
-        order.formula_snapshot = await _build_formula_snapshot(
-            db, fields["formula_id"], target_product_id
-        )
+        order.formula_snapshot = await _build_formula_snapshot(db, fields["formula_id"], target_product_id)
         order.formula_id = fields["formula_id"] or None
     elif "product_id" in fields and order.formula_id:
         await _build_formula_snapshot(db, order.formula_id, fields["product_id"])
@@ -138,11 +145,13 @@ async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) 
     if "product_id" in fields:
         order.product_id = fields["product_id"]
     if "spec_params" in fields:
-        order.spec_params = fields["spec_params"] or {}
+        order.spec_params = validate_specification(fields["spec_params"] or {})
     if "quantity" in fields:
         order.quantity = fields["quantity"]
     if "unit" in fields:
         order.unit = fields["unit"]
+    if "unit" in fields or "quantity" in fields:
+        order.quantity, order.unit = standard_quantity(order.quantity, order.unit)
     if "extra_notes" in fields:
         notes = fields["extra_notes"]
         order.extra_notes = notes.strip() if notes else None
@@ -156,6 +165,7 @@ async def update_order(db: AsyncSession, order_id: str, fields: dict[str, Any]) 
 
 
 async def delete_order(db: AsyncSession, order_id: str) -> None:
+    await lock_scheduling_inputs(db)
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "订单不存在")

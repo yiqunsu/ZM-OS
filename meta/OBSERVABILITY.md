@@ -126,3 +126,13 @@ OpenInference Trace 可能采集：
 
 不要为了减少系统数量而把以上四类数据合并成一个不清晰的数据源。
 
+
+## 9. 专用 Agent Worker
+
+worker 启动时独立初始化结构化日志与可选 Phoenix。新版 Trace 强制隐藏 inputs、outputs 和图片，保留步骤/时延/token 等元信息；API 服务与 worker 的健康独立。worker 致命错误只记录异常类型，避免原始数据库/供应商异常正文进入日志。单轮失败记录 agent_run_failed 和 run_id：已知分类错误记录安全的 error_code，未知异常只记录 error_type；不记录模型原文或异常正文。
+
+`python -m app.agent.worker --healthcheck` 检查 watchdog 最近 30 秒内是否完成数据库和附件清理检查。Compose 预留 190 秒正常关闭时间；进程失联仍由租约及重启后的 watchdog 回收 Run。新业务审计只记录结果摘要，统计不完整的 token 数为 NULL。
+
+## 视觉识别诊断（2026-09-13）
+
+视觉传输与Schema错误通过既有 `run.progress` 的 RECOGNITION_ERROR 阶段记录安全错误码与重试序号；终止时工作项 last_error_code 与 recognition.failed 保存原因。客户/产品选择通过 MATCHING 阶段和 context_snapshot.entity_matching 保存每单、每字段的接受/拒绝码。错误码协议见 [Agent contracts](agent-design/contracts.md)。禁止把图片字节、完整模型响应、上游HTTP响应正文或凭证放入诊断事件/异常；仅在受权限保护的业务提取记录保留核对所需原文与建议依据。

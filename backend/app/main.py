@@ -1,16 +1,13 @@
-from contextlib import asynccontextmanager
-
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.agent.graph import close_agent, init_agent
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
 from app.core.phoenix import setup_phoenix
 from app.core.request_logging import RequestLoggingMiddleware
 from app.routers import (
-    agent,
+    agent_v2,
     auth,
     customers,
     formulas,
@@ -36,30 +33,13 @@ else:
 setup_phoenix()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # OpenClaw is reached lazily over HTTP. LangGraph still needs its Postgres
-    # checkpointer lifecycle when selected as the rollback runtime.
-    if settings.AGENT_RUNTIME == "langgraph":
-        try:
-            await init_agent()
-            logger.info("agent_initialized", runtime="langgraph")
-        except Exception as err:  # noqa: BLE001
-            logger.error("agent_init_failed", runtime="langgraph", error_type=type(err).__name__)
-    else:
-        logger.info("agent_initialized", runtime="openclaw")
-    yield
-    if settings.AGENT_RUNTIME == "langgraph":
-        await close_agent()
-
-
-app = FastAPI(title="FilmOS Backend", lifespan=lifespan)
+app = FastAPI(title="FilmOS Backend")
 
 app.add_middleware(RequestLoggingMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,6 +63,6 @@ for router in (
     orders.router,
     production_tasks.router,
     kanban.router,
-    agent.router,
+    agent_v2.router,
 ):
     app.include_router(router, prefix="/api")

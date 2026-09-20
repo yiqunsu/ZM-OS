@@ -1,4 +1,5 @@
 "use client";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
@@ -13,8 +14,11 @@ import type { KanbanOrder, KanbanTask, TaskStatus } from "./types";
 import { TASK_STATUS_LABEL, TASK_STATUS_STYLE, TASK_STATUS_CYCLE } from "./types";
 
 /* ── Full order detail type (fetched on demand) ── */
+import { orderDisplayStatus, ORDER_STATUS_LABEL as STATUS_LABEL, ORDER_STATUS_STYLE as STATUS_STYLE, type OrderStatus, type OrderDisplayStatus } from "@/lib/order-status";
+
 interface FullOrder {
-  id: string; order_no: string; status: string;
+  task?: { status: Exclude<OrderDisplayStatus, "PENDING"> } | null;
+  id: string; order_no: string; status: OrderStatus;
   quantity: number; unit: string; spec_params: Record<string, string>;
   extra_notes: string | null; formula_snapshot: { name?: string; materials?: string } | null; created_at: string;
   customer: { company: string; contact: string };
@@ -22,12 +26,7 @@ interface FullOrder {
   formula:  { id: string; name: string; materials: string } | null;
 }
 
-const STATUS_LABEL: Record<string, string> = { PENDING: "待排单", PRODUCING: "生产中", DONE: "已完成" };
-const STATUS_STYLE: Record<string, string> = {
-  PENDING:   "bg-amber-50 text-amber-600 border-amber-200",
-  PRODUCING: "bg-blue-50 text-blue-600 border-blue-200",
-  DONE:      "bg-green-50 text-green-600 border-green-200",
-};
+
 
 function getMaterials(order: FullOrder): string | null {
   if (order.formula_snapshot?.materials?.trim()) return order.formula_snapshot.materials.trim();
@@ -71,11 +70,9 @@ function OrderRow({
   async function openDetail(e: React.MouseEvent) {
     e.stopPropagation();
     setDetailOpen(true);
-    if (!fullOrder) {
-      setDetailLoading(true);
-      setFullOrder(await api.get<FullOrder>(`/orders/${order.id}`));
-      setDetailLoading(false);
-    }
+    setDetailLoading(true);
+    setFullOrder(await api.get<FullOrder>(`/orders/${order.id}`));
+    setDetailLoading(false);
   }
 
   const specs = Object.entries(order.spec_params ?? {});
@@ -146,8 +143,8 @@ function OrderRow({
             <DialogTitle className="flex items-center gap-3">
               <span className="font-mono text-sm font-semibold text-slate-700">{order.order_no}</span>
               {fullOrder && (
-                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[fullOrder.status]}`}>
-                  {STATUS_LABEL[fullOrder.status]}
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[orderDisplayStatus(fullOrder)]}`}>
+                  {STATUS_LABEL[orderDisplayStatus(fullOrder)]}
                 </span>
               )}
             </DialogTitle>
@@ -209,16 +206,20 @@ function OrderRow({
 interface Props {
   task:          KanbanTask;
   pendingOrders: KanbanOrder[];
-  onStatusChange: (status: TaskStatus) => void;
-  onDelete:       () => void;
+  onStatusChange: (status: TaskStatus) => void | Promise<unknown>;
+  onDelete:       () => Promise<unknown>;
   onAddOrder:     (orderId: string) => void;
   overlay?:       boolean;
+  readOnly?: boolean;
 }
 
 export default function TaskCard({
-  task, pendingOrders, onStatusChange, onDelete, onAddOrder, overlay = false,
+  task, pendingOrders, onStatusChange, onDelete, onAddOrder, overlay = false, readOnly = false,
 }: Props) {
+  const meterTask = task.orders.some(order => order.unit === "m");
+  const mergeCandidates = pendingOrders.filter(order => (order.unit === "m") === meterTask);
   const [deleteOpen,   setDeleteOpen]   = useState(false);
+  const [statusTarget, setStatusTarget] = useState<TaskStatus | null>(null);
   const [addOrderOpen, setAddOrderOpen] = useState(false);
 
   const {
@@ -226,12 +227,12 @@ export default function TaskCard({
   } = useSortable({
     id:   task.id,
     data: { type: "task", machineId: task.machine_id },
-    disabled: overlay || task.status !== "WAITING",
+    disabled: readOnly || overlay || task.status !== "WAITING",
   });
 
   /* Detect when a pending-order or task-order is being dragged over this card */
   const { active, over } = useDndContext();
-  const isOrderOverMe = !overlay &&
+  const isOrderOverMe = !readOnly && !overlay &&
     task.status === "WAITING" &&
     over?.id === task.id &&
     (active?.data.current?.type === "order" ||
@@ -286,19 +287,28 @@ export default function TaskCard({
 
           {/* Status badge — click to advance */}
           <button
-            onClick={() => onStatusChange(nextStatus)}
+            disabled={readOnly || overlay || task.status === "DONE"}
+            onClick={() => setStatusTarget(nextStatus)}
             className={`px-2 py-0.5 rounded-full text-xs font-semibold transition-opacity hover:opacity-75 ${TASK_STATUS_STYLE[task.status]}`}
-            title={`点击标记「${TASK_STATUS_LABEL[nextStatus]}」`}
+            title={readOnly ? "已有排产 · 只读" : `点击标记「${TASK_STATUS_LABEL[nextStatus]}」`}
           >
             {TASK_STATUS_LABEL[task.status]}
           </button>
 
+          {!readOnly && !overlay && task.status === "PRODUCING" && (
+            <button type="button" onClick={() => setStatusTarget("WAITING")}
+              title="撤回到待生产" className="shrink-0 rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              撤回
+            </button>
+          )}
+
           <span className="flex-1" />
 
+          {!readOnly && <>
           {/* Add order button */}
           <button
             onClick={() => setAddOrderOpen(true)}
-            disabled={pendingOrders.length === 0 || task.status !== "WAITING"}
+            disabled={mergeCandidates.length === 0 || task.status !== "WAITING"}
             className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 transition-colors"
             title="添加订单（合并生产）"
           >
@@ -310,7 +320,7 @@ export default function TaskCard({
           {/* Delete button */}
           <button
             onClick={() => setDeleteOpen(true)}
-            disabled={task.status !== "WAITING"}
+            disabled={readOnly || task.status !== "WAITING"}
             className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
             title={task.status === "WAITING" ? "删除任务（订单退回待排单）" : "生产中的任务不能删除"}
           >
@@ -318,6 +328,7 @@ export default function TaskCard({
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
+          </>}
         </div>
 
         {/* Orders list — each row is independently draggable */}
@@ -327,7 +338,7 @@ export default function TaskCard({
               key={order.id}
               order={order}
               fromTaskId={task.id}
-              disabled={task.status !== "WAITING"}
+              disabled={readOnly || task.status !== "WAITING"}
             />
           ))}
         </div>
@@ -340,29 +351,27 @@ export default function TaskCard({
         )}
       </div>
 
+      {statusTarget && <ConfirmDialog open
+        title={statusTarget === "WAITING" ? "确认撤回到待生产？" : statusTarget === "DONE" ? "确认完成生产？" : "确认开始生产？"}
+        description={`本任务的 ${task.orders.length} 笔订单将一起标记为「${TASK_STATUS_LABEL[statusTarget]}」。${statusTarget === "WAITING" ? "保留原机器与排队位置，不会取消排单。" : ""}\n${task.orders.map(order => order.order_no).join("、")}`}
+        confirmLabel={statusTarget === "WAITING" ? "确认撤回" : statusTarget === "DONE" ? "确认完成" : "确认开始"} destructive={false}
+        onCancel={() => setStatusTarget(null)}
+        onConfirm={async () => { await onStatusChange(statusTarget); setStatusTarget(null); }} />}
+
       {/* Delete confirm dialog */}
-      <Dialog open={deleteOpen} onOpenChange={(o) => !o && setDeleteOpen(false)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="text-slate-800">删除生产任务</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500 py-2">
-            确认删除该任务？任务内 <span className="font-medium text-slate-700">{task.orders.length}</span> 张订单将退回「待排单」。
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} className="border-slate-200 text-slate-600">取消</Button>
-            <Button onClick={() => { setDeleteOpen(false); onDelete(); }} className="bg-red-500 hover:bg-red-600 text-white border-0">确认删除</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog open={deleteOpen} title="删除生产任务？"
+        description={`此任务将删除，其中的 ${task.orders.length} 笔订单会退回待排单，订单本身会保留。`}
+        onCancel={() => setDeleteOpen(false)} onConfirm={async () => { await onDelete(); setDeleteOpen(false); }} />
 
       {/* Add order dialog */}
       <Dialog open={addOrderOpen} onOpenChange={(o) => !o && setAddOrderOpen(false)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle className="text-slate-800">添加订单（合并生产）</DialogTitle></DialogHeader>
           <div className="py-2 space-y-2 max-h-72 overflow-y-auto">
-            {pendingOrders.length === 0 ? (
+            {mergeCandidates.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-4">暂无待排单订单</p>
             ) : (
-              pendingOrders.map((order) => (
+              mergeCandidates.map((order) => (
                 <button
                   key={order.id}
                   onClick={() => { onAddOrder(order.id); setAddOrderOpen(false); }}

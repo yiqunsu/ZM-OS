@@ -33,15 +33,11 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
-      - path: ./openclaw/.env
-        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://filmos:filmos@postgres:5432/filmos
       REDIS_URL: redis://redis:6379
-      AGENT_RUNTIME: ${AGENT_RUNTIME:-openclaw}
-      OPENCLAW_BASE_URL: http://openclaw:18789
-      OPENCLAW_AGENT_ID: filmos-web
       CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
       PHOENIX_ENABLED: "true"
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
     volumes:
@@ -52,54 +48,29 @@ services:
       - phoenix
     networks:
       - default
-      - agent
 
-  openclaw:
-    image: ghcr.io/openclaw/openclaw:2026.7.1-slim@sha256:6a31d44b2944e7adcd2b582bf6fb463111264ebca97a0201795b799135bd102c
-    restart: unless-stopped
+  agent-worker:
+    build: ./backend
+    command: [python, -m, app.agent.worker]
     init: true
-    env_file:
-      - ./backend/.env
-      - path: ./openclaw/.env
-        required: false
-    environment:
-      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
-      OPENCLAW_STATE_DIR: /home/node/.openclaw
-      OPENCLAW_WORKSPACE_DIR: /workspace
-      OPENCLAW_DISABLE_BONJOUR: "1"
-    command:
-      [
-        "sh",
-        "-lc",
-        "cp /etc/openclaw/openclaw.seed.json /home/node/.openclaw/openclaw.json && chmod 600 /home/node/.openclaw/openclaw.json && exec node openclaw.mjs gateway --bind lan --port 18789",
-      ]
-    volumes:
-      - ./openclaw/config/openclaw.json:/etc/openclaw/openclaw.seed.json:ro
-      - ./openclaw/workspace:/workspace:ro
-      - openclaw_state:/home/node/.openclaw
-    networks:
-      openclaw_egress:
-        gw_priority: 1
-      agent:
+    restart: unless-stopped
+    stop_grace_period: 190s
     healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:18789/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
-        ]
-      interval: 15s
+      test: [CMD, python, -m, app.agent.worker, --healthcheck]
+      interval: 10s
       timeout: 5s
-      retries: 8
+      retries: 3
       start_period: 30s
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://filmos:filmos@postgres:5432/filmos
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
+      CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
+      PHOENIX_ENABLED: "false"
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
+    depends_on:
+      - postgres
 
   frontend:
     build:
@@ -109,16 +80,12 @@ services:
     ports:
       - "3000:3000"
     env_file: ./frontend/.env.local
+    environment:
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
     depends_on:
       - backend
 
 volumes:
   pgdata:
   phoenixdata:
-  openclaw_state:
   chat_attachments:
-
-networks:
-  agent:
-    internal: true
-  openclaw_egress:

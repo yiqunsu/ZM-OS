@@ -110,8 +110,11 @@ export default function KanbanBoard() {
     }
   }
 
-  async function runMutation(action: () => Promise<unknown>) {
-    if (busy) return;
+  async function runMutation(action: () => Promise<unknown>, propagateError = false) {
+    if (busy) {
+      if (propagateError) throw new Error("正在处理其他操作，请稍后重试");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -120,6 +123,7 @@ export default function KanbanBoard() {
     } catch (mutationError) {
       setError(errorMessage(mutationError));
       await load(false);
+      if (propagateError) throw mutationError;
     } finally {
       setBusy(false);
     }
@@ -163,11 +167,15 @@ export default function KanbanBoard() {
   }
 
   function updateTaskStatus(taskId: string, status: TaskStatus) {
-    return runMutation(() => api.put(`/production-tasks/${taskId}`, { status }));
+    const task = machines.flatMap(machine => machine.tasks).find(task => task.id === taskId);
+    return runMutation(() => api.put(`/production-tasks/${taskId}`, {
+      status, expected_status: task?.status, expected_updated_at: task?.updated_at,
+      expected_order_ids: task?.orders.map(order => order.id),
+    }), true);
   }
 
   function deleteTask(taskId: string) {
-    return runMutation(() => api.delete(`/production-tasks/${taskId}`));
+    return runMutation(() => api.delete(`/production-tasks/${taskId}`), true);
   }
 
   function reorderTasks(machineId: string, activeTaskId: string, overTaskId: string) {
@@ -338,7 +346,7 @@ export default function KanbanBoard() {
             task={activeItem.task}
             pendingOrders={[]}
             onStatusChange={() => {}}
-            onDelete={() => {}}
+            onDelete={async () => {}}
             onAddOrder={() => {}}
             overlay
           />

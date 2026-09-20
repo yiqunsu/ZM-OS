@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useDndContext } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -7,15 +8,17 @@ import TaskCard from "./TaskCard";
 import type { KanbanMachine, KanbanOrder, KanbanTask, TaskStatus } from "./types";
 
 interface Props {
+  readOnly?: boolean;
+  draftContent?: ReactNode;
   machine:        KanbanMachine;
   pendingOrders:  KanbanOrder[];
-  onTaskStatusChange: (taskId: string, status: TaskStatus) => void;
-  onTaskDelete:       (taskId: string) => void;
+  onTaskStatusChange: (taskId: string, status: TaskStatus) => void | Promise<unknown>;
+  onTaskDelete:       (taskId: string) => Promise<unknown>;
   onAddOrderToTask:   (taskId: string, orderId: string) => void;
 }
 
 export default function MachineColumn({
-  machine, pendingOrders, onTaskStatusChange, onTaskDelete, onAddOrderToTask,
+  machine, pendingOrders, onTaskStatusChange, onTaskDelete, onAddOrderToTask, readOnly = false, draftContent,
 }: Props) {
   const droppableId = `col-${machine.id}`;
 
@@ -84,6 +87,7 @@ export default function MachineColumn({
               <TaskCard
                 key={task.id}
                 task={task}
+                readOnly={readOnly}
                 pendingOrders={pendingOrders}
                 onStatusChange={(status) => onTaskStatusChange(task.id, status)}
                 onDelete={() => onTaskDelete(task.id)}
@@ -93,6 +97,8 @@ export default function MachineColumn({
           </div>
         </SortableContext>
 
+        {draftContent}
+        {!readOnly && <>
         {/* Empty state / new-task drop zone */}
         {machine.tasks.length === 0 ? (
           <div className={`flex flex-col items-center justify-center h-full py-12 text-center rounded-lg border-2 border-dashed transition-colors ${
@@ -123,6 +129,7 @@ export default function MachineColumn({
             </div>
           )
         )}
+        </>}
       </div>
     </div>
   );

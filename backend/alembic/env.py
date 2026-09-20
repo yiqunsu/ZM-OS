@@ -32,22 +32,6 @@ target_metadata = Base.metadata
 # ... etc.
 
 
-# LangGraph's Postgres checkpointer owns these tables (created via checkpointer.setup(),
-# not Alembic). Exclude them from autogenerate so it never tries to drop them.
-_CHECKPOINTER_TABLES = {
-    "checkpoints",
-    "checkpoint_writes",
-    "checkpoint_blobs",
-    "checkpoint_migrations",
-}
-
-
-def include_object(obj, name, type_, reflected, compare_to):
-    if type_ == "table" and name in _CHECKPOINTER_TABLES:
-        return False
-    return True
-
-
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -66,7 +50,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -77,7 +60,6 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_object=include_object,
     )
 
     with context.begin_transaction():

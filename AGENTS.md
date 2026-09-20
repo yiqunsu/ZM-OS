@@ -10,15 +10,7 @@
 4. 开始实现和交付前阅读 [meta/TESTING.md](meta/TESTING.md)；
 5. 改变长期架构选择前检查 [meta/decisions/](meta/decisions/)；
 6. 修改日志、Sentry、Phoenix 或追踪配置时阅读 [meta/OBSERVABILITY.md](meta/OBSERVABILITY.md)；
-7. 使用 Trellis 任务、规范或工作日志时阅读 [meta/TRELLIS.md](meta/TRELLIS.md)；
-8. 修改 `frontend/` 时同时遵守 `frontend/AGENTS.md`。
-
-## Trellis 工作流
-
-- `.trellis/` 保存 Trellis 的任务、分层 spec、工作日志和运行脚本；`.agents/skills/` 与 `.codex/` 保存 Codex 集成。
-- `meta/` 是 FilmOS 业务事实与跨工具工程规范的权威来源；`.trellis/spec/` 是按任务注入给 Agent 的执行层，不得与 `meta/` 冲突。
-- Trellis 当前关闭 session 自动提交；任何提交仍需按当前用户授权执行。
-- 修改 Trellis 生成文件前先区分项目规范与上游模板，升级方式见 `meta/TRELLIS.md`。
+7. 修改 `frontend/` 时同时遵守 `frontend/AGENTS.md`。
 
 ## 项目边界
 

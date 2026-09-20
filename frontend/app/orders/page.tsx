@@ -1,15 +1,19 @@
 "use client";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import OrderStatusButton from "@/components/orders/OrderStatusButton";
+import { orderDisplayStatus, ORDER_STATUS_LABEL as STATUS_LABEL, ORDER_STATUS_STYLE as STATUS_STYLE, type OrderStatus, type OrderDisplayStatus } from "@/lib/order-status";
+import type { KanbanTask, TaskStatus } from "@/components/kanban/types";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 
 /* ─── Types ─── */
-type OrderStatus = "PENDING" | "PRODUCING" | "DONE";
+
 
 interface Category { id: string; name: string }
 interface Product  { id: string; name: string; category: Category }
@@ -26,6 +30,7 @@ interface Order {
   unit:        string;
   formula:     Formula | null;
   status:      OrderStatus;
+  task?: { id: string; status: TaskStatus; updated_at?: string } | null;
   created_at:  string;
 }
 
@@ -34,27 +39,10 @@ interface FullOrder extends Order {
   extra_notes:      string | null;
 }
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  PENDING:   "待排单",
-  PRODUCING: "生产中",
-  DONE:      "已完成",
-};
-
-const STATUS_STYLE: Record<OrderStatus, string> = {
-  PENDING:   "bg-amber-50 text-amber-700 border border-amber-200",
-  PRODUCING: "bg-blue-50 text-blue-700 border border-blue-200",
-  DONE:      "bg-green-50 text-green-700 border border-green-200",
-};
-
-const STATUS_CYCLE: Record<OrderStatus, OrderStatus> = {
-  PENDING:   "PRODUCING",
-  PRODUCING: "DONE",
-  DONE:      "PENDING",
-};
-
-const FILTER_TABS: { key: OrderStatus | "ALL"; label: string }[] = [
+const FILTER_TABS: { key: OrderDisplayStatus | "ALL"; label: string }[] = [
   { key: "ALL",       label: "全部" },
   { key: "PENDING",   label: "待排单" },
+  { key: "WAITING",   label: "待生产" },
   { key: "PRODUCING", label: "生产中" },
   { key: "DONE",      label: "已完成" },
 ];
@@ -74,7 +62,7 @@ export default function OrdersPage() {
   const router = useRouter();
   const [orders,       setOrders]       = useState<Order[]>([]);
   const [loading,      setLoading]      = useState(true);
-  const [filter,       setFilter]       = useState<OrderStatus | "ALL">("ALL");
+  const [filter,       setFilter]       = useState<OrderDisplayStatus | "ALL">("ALL");
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
   const [detailOrder,  setDetailOrder]  = useState<FullOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -103,11 +91,12 @@ export default function OrdersPage() {
     setDetailLoading(false);
   }
 
-  async function cycleStatus(order: Order, e: React.MouseEvent) {
-    e.stopPropagation();
-    const next = STATUS_CYCLE[order.status];
-    await api.put(`/orders/${order.id}`, { status: next });
-    setOrders((prev) => prev.map((o) => o.id === order.id ? { ...o, status: next } : o));
+  function statusUpdated(task: KanbanTask) {
+    const ids = new Set(task.orders.map(order => order.id));
+    setOrders(previous => previous.map(order => ids.has(order.id) ? {
+      ...order, status: task.status === "DONE" ? "DONE" : "PRODUCING",
+      task: { id: task.id, status: task.status, updated_at: task.updated_at },
+    } : order));
   }
 
   async function handleDelete() {
@@ -117,7 +106,7 @@ export default function OrdersPage() {
       setDeleteTarget(null);
       setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "删除失败");
+      throw new Error(e instanceof ApiError ? e.message : "删除失败，请重试");
     }
   }
 
@@ -138,7 +127,7 @@ export default function OrdersPage() {
   }
 
   const displayed = orders.filter((o) => {
-    if (filter !== "ALL" && o.status !== filter) return false;
+    if (filter !== "ALL" && orderDisplayStatus(o) !== filter) return false;
     if (filterCustomer && o.customer.id !== filterCustomer) return false;
     if (filterProduct  && o.product.id  !== filterProduct)  return false;
     if (filterDateFrom) {
@@ -152,11 +141,12 @@ export default function OrdersPage() {
     return true;
   });
 
-  const counts: Record<OrderStatus | "ALL", number> = {
+  const counts: Record<OrderDisplayStatus | "ALL", number> = {
     ALL:       orders.length,
-    PENDING:   orders.filter((o) => o.status === "PENDING").length,
-    PRODUCING: orders.filter((o) => o.status === "PRODUCING").length,
-    DONE:      orders.filter((o) => o.status === "DONE").length,
+    PENDING:   orders.filter((o) => orderDisplayStatus(o) === "PENDING").length,
+    WAITING:   orders.filter((o) => orderDisplayStatus(o) === "WAITING").length,
+    PRODUCING: orders.filter((o) => orderDisplayStatus(o) === "PRODUCING").length,
+    DONE:      orders.filter((o) => orderDisplayStatus(o) === "DONE").length,
   };
 
   return (
@@ -290,7 +280,7 @@ export default function OrdersPage() {
         ) : displayed.length === 0 ? (
           <div className="py-16 text-center">
             <p className="text-slate-400 text-sm">
-              {filter === "ALL" ? "暂无订单" : `暂无「${STATUS_LABEL[filter as OrderStatus]}」订单`}
+              {filter === "ALL" ? "暂无订单" : `暂无「${STATUS_LABEL[filter as OrderDisplayStatus]}」订单`}
             </p>
           </div>
         ) : (
@@ -310,12 +300,7 @@ export default function OrdersPage() {
                         <span className="text-slate-300">ORD-</span>
                         <span className="text-slate-700 font-semibold">{order.order_no.replace("ORD-", "")}</span>
                       </span>
-                      <button
-                        onClick={(e) => cycleStatus(order, e)}
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 ${STATUS_STYLE[order.status]}`}
-                      >
-                        {STATUS_LABEL[order.status]}
-                      </button>
+                      <OrderStatusButton order={order} orders={orders} onUpdated={statusUpdated} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 ${STATUS_STYLE[orderDisplayStatus(order)]}`} />
                     </div>
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="min-w-0">
@@ -405,12 +390,7 @@ export default function OrdersPage() {
                           <span className="text-slate-400 text-xs ml-1">{order.unit}</span>
                         </td>
                         <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={(e) => cycleStatus(order, e)}
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold transition-opacity hover:opacity-75 ${STATUS_STYLE[order.status]}`}
-                          >
-                            {STATUS_LABEL[order.status]}
-                          </button>
+                          <OrderStatusButton order={order} orders={orders} onUpdated={statusUpdated} className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold transition-opacity hover:opacity-75 ${STATUS_STYLE[orderDisplayStatus(order)]}`} />
                         </td>
                         <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -454,8 +434,8 @@ export default function OrdersPage() {
               {detailOrder && (
                 <>
                   <span className="font-mono text-sm font-semibold text-slate-700">{detailOrder.order_no}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[detailOrder.status]}`}>
-                    {STATUS_LABEL[detailOrder.status]}
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[orderDisplayStatus(detailOrder)]}`}>
+                    {STATUS_LABEL[orderDisplayStatus(detailOrder)]}
                   </span>
                 </>
               )}
@@ -522,18 +502,9 @@ export default function OrdersPage() {
       </Dialog>
 
       {/* 删除确认 */}
-      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="text-slate-800">确认删除</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500 py-2">
-            确定删除订单「<span className="font-medium text-slate-700">{deleteTarget?.order_no}</span>」吗？此操作不可撤销。
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} className="border-slate-200 text-slate-600">取消</Button>
-            <Button onClick={handleDelete} className="bg-red-500 hover:bg-red-600 text-white border-0">删除</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog open={deleteTarget !== null} title="删除这笔订单？"
+        description={`将删除订单「${deleteTarget?.order_no ?? ""}」，此操作无法撤销。`}
+        onCancel={() => setDeleteTarget(null)} onConfirm={handleDelete} />
     </>
   );
 }

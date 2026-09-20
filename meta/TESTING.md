@@ -11,7 +11,7 @@
 - 前端静态检查：ESLint + TypeScript；
 - 前端生产验证：Next.js build；
 - CI 配置位于 `.github/workflows/`；
-- 当前尚无正式前端单元测试或端到端测试框架，不得虚构测试命令。
+- 前端交互与端到端验证：Playwright，协议测试和隔离全栈测试分开执行，见第 11 节。
 
 ## 2. 常用命令
 
@@ -63,8 +63,7 @@ curl -fsS http://localhost:8000/health
 | 鉴权与权限 | OIDC 登录、JWT/JWKS、身份关联、并发首次登录、不同角色、刷新与联合退出测试 |
 | 看板与排产 | 后端事务测试、失败回滚、并发/重复操作测试、前端交互验证 |
 | Phoenix / OpenTelemetry | 启用与禁用启动路径、Trace 可见性、采集端不可用时业务 API 仍正常 |
-| OpenClaw / Agent runtime | 适配器协议测试、会话隔离、Gateway 鉴权、容器健康检查、SSE 手动对话 |
-| Trellis 配置 / spec / hooks | 运行 Trellis context/task 脚本、检查 Markdown 链接、确认 `meta/` 与 `.trellis/spec/` 无冲突 |
+| Agent | 受限工具循环、会话隔离、确认与版本保护、SSE 手动对话 |
 | Docker / 环境配置 | `docker compose config --quiet`、重建受影响镜像、健康检查 |
 | 仅文档 | 检查链接、命令和文件路径；确认未与 Ground Truth/ADR 冲突 |
 
@@ -128,43 +127,28 @@ curl -fsS http://localhost:6006 >/dev/null
 4. Phoenix 容器停止时，非 Agent 业务 API 不受影响；
 5. Trace 中没有密码、JWT、Cookie、API Key 或数据库凭证。
 
-## 9. Trellis 验证
+## 9. Agent 验证
 
-修改 `.trellis/`、`.agents/skills/` 或 `.codex/` 时至少运行：
+- 模拟模型验证受限工具循环、非法工具拒绝和迭代上限。
+- 验证会话隔离、消息与附件持久化、模型失败后的 SSE 错误。
+- 验证录单确认只执行一次，草案版本冲突和输入变化拒绝执行。
+- 人工验证文本录单、图片录单、草案调整及确认执行。
 
-```bash
-python3 ./.trellis/scripts/get_context.py --mode packages
-python3 ./.trellis/scripts/task.py list
-```
+`tests/test_admission.py` 验证两类 Agent 对额外 reason 解释字段的兼容、非法枚举/未知字段/截断回复的拒绝、实际 ChatOpenAI HTTP 适配器的 JSON 请求，以及独立数据库连接下 Worker 的明确失败事件和输入/草稿保留。
 
-还应确认：
+`tests/test_unit_inference.py` 验证规格单位推测的预填、原始证据保留、明确单位优先、不支持的厚度 g 拒绝猜测、无依据无默认值、同图多单独立保存，以及手改后的推测提示生命周期。全栈同图多单场景验证无单位数值经推测换算后直接出现在输入框。
 
-1. `.trellis/config.yaml` 中的 package 路径存在；
-2. `.trellis/spec/` 没有残留 `(To be filled by the team)`；
-3. Trellis spec 与 `meta/GROUND_TRUTH.md`、`meta/ENGINEERING_RULES.md` 和 `meta/TESTING.md` 不冲突；
-4. hooks 使用仓库内相对路径，且未写入本机秘密或绝对开发路径；
-5. Trellis 更新不会未经用户授权自动提交业务代码。
+`tests/test_quantity_extraction.py` 覆盖数量夹带单位/交付短语、千分位、单位换算、范围/冲突拒绝、同图数量独立保存，以及历史空数量定向修复的幂等、事件、人工值保护和选择状态不变。修复脚本默认 dry-run，apply 必须先写私有备份。
 
-## 10. OpenClaw 验证
+`tests/test_extraction_schema.py` 验证强类型模型输出：字符串/bool/非有限或越界数值拒绝、单位枚举、必填nullable字段、原始单号类型、推测证据一致性、原文不兜底解析、字段级纠错重试及二次失败不落草稿。
 
-修改 `openclaw/`、Agent runtime 适配器或相关 Compose 配置时至少验证：
+排单范围提示词变更应额外对真实模型做只读分类检查：“帮我排单”“安排一下生产”应为 ALLOW/GENERATE，查询及否定生成应为 QUERY，明确正式下发应为 EXECUTE_REQUEST。此检查不调用工具、不生成实际业务草案；Graph 测试另验证空待排说明及人工确认边界。
 
-```bash
-docker compose config --quiet
-docker compose up -d postgres openclaw backend
-docker compose ps openclaw backend
-./openclaw/tests/smoke.sh
-```
+模型 HTTP 与截断输出回归位于 `tests/test_model_transport.py`；图片有效性测试使用实际 agent_attachment_service.inspect_image，旧 data URL 校验路径已删除。前端协议回归包含首次快照失败后点击刷新重新建立事件连接并接收流式消息。
 
-还应确认：
+`tests/test_order_extraction_normalizer.py` 覆盖 v2 数值的 Decimal 换算、换算后超范围/超精度保留待核对、规格独立转换及原始证据不变，并通过 Graph 验证人工填写与明确清空的字段不被识别覆盖。前端补充多图部分上传失败后复用已上传附件、同上传标识重试的协议回归。
 
-1. OpenClaw 没有宿主机端口映射，未携带 Gateway Token 的请求被拒绝；
-2. 同一会话标识稳定，不同用户或会话不会共享 OpenClaw 上下文；
-3. 上游失败只向浏览器返回安全错误，不泄露响应正文、Token 或内部地址；
-4. 完整响应才写入 FilmOS 助手消息历史，中断的流不得伪装成成功；
-5. 第一版没有 FilmOS 业务工具，也不能绕过 FastAPI 访问 PostgreSQL。
-
-## 11. Casdoor 与 RBAC 验证
+## 10. Casdoor 与 RBAC 验证
 
 修改 Casdoor、Auth.js、JWT 验证或角色权限时，自动化检查至少覆盖：
 
@@ -187,3 +171,59 @@ deploy/production/tests/smoke-backup-restore.sh
 ```
 
 该脚本只允许恢复到以 `_restore_test` 结尾的临时数据库，并在结束时销毁随机命名的测试容器和 volume；它不替代生产环境的人工 OIDC 验收。
+
+
+## 11. 专用 Agent
+
+`tests/test_agent_v2.py` 使用 PostgreSQL 验证消息幂等与原子入队、跨会话隔离、多图顺序、独立 worker 领取、租约失效、工具副作用回滚、事件补读及私有附件清理。并发测试使用独立连接与同步屏障；模型使用明确注入的模拟 executor，不连接真实模型。
+
+`tests/test_agent_migrations.py` 分别从空库和带历史会话/附件的数据结构升级到 head，并执行 Alembic 漂移检查与关键约束验证。测试库使用 `filmos_migration_test_*` 前缀，结束后删除；禁止将该测试改为操作业务数据库。
+
+`tests/test_order_intake_v2.py` 用注入的模型和视觉响应验证录单 Graph、已有对象匹配、最新稿确认、逐张继续与暂放恢复。`tests/test_scheduling_v2.py` 验证空待排、全不可排、草案版本、替换失败保留、人工确认幂等，以及普通新增订单与 Agent 确认之间的真实 PostgreSQL 并发。
+
+前端在 `frontend/` 执行 `npm run test:agent`（首次先 `npx playwright install chromium`）。Playwright 启动独立 3101 端口 Next.js，测试内构造测试登录 Cookie，模拟业务接口响应；SSE 用 8102 端口本地 HTTP 流经过真实 Next.js 代理验证游标转发和刷新恢复；验证双入口、首页不加载或展示会话列表、工作区打开失败后入口可重试、无图排单、消息重试、忙碌限制、草稿冲突、下一项与人工确认，并检查真实同源代理的 401/403。测试凭证仅存在测试代码，不修改应用认证规则，不访问真实模型或业务数据库。
+
+完整组件联调在 `frontend/` 执行 `npm run test:agent:fullstack`。前提是 `backend/venv` 已安装后端开发依赖、本机 PostgreSQL 开发服务可用、Chromium 已安装，3131/8131/8132 端口空闲。启动器只使用本机开发数据库账号创建随机 `filmos_agent_e2e_*` 空库，经完整 Alembic 链升级、写入合成基础数据后启动 API、独立 Worker、Next.js 和本地 OpenAI 协议 HTTP 服务；退出时关闭子进程并删除该临时库和附件。不得将启动器改为读取业务数据库 URL。
+
+全栈测试通过真实开发登录取得 Auth.js 会话和后端 JWT，不伪造 Cookie、不拦截业务请求、不替换 Graph 或 Worker。外部模型返回确定性合成结果，覆盖多图队列、202 后刷新恢复、工具调用、最新稿确认、下一项、人工排单、其他用户隔离以及旧接口/历史入口移除。测试日志位于 `frontend/test-results/fullstack-logs/`，失败时另保存 Playwright 截图和 Trace。两个测试套件与生产构建使用同一个 `.next` 目录，应顺序运行。
+
+隔离前端通过 `CORS_ORIGINS` JSON 数组配置准确来源；应用默认仍为 `["http://localhost:3000"]`，不开放通配来源。测试进程显式绕过工作站 HTTP/系统代理，只连接本地模型服务。`.github/workflows/agent-ci.yml` 在临时 CI 数据库执行上述两个套件。
+
+这些测试不代表真实截图识别质量达标，也不替代生产 Casdoor 登录、真实模型和业务样本验收。剩余门槛见 [实施进度](agent-design/implementation-status.md)。
+
+前端界面补充验收：`test:agent` 还覆盖 390px 手机的列表/原图/表单切换、未保存草稿保留和离开确认；顶部记录/会话抽屉、实际生产队列独立读取、队列加载失败保留旧快照并重试；中文阶段/工具摘要与首页会话列表失败重试。测试生成首页、录单、排单、手机工作区截图，可用于人工视觉检查。实际队列使用已有 `/api/kanban`，每 15 秒以及会话事件变化后刷新，不写入草案；草案编辑状态不被刷新覆盖。
+
+旧版退役验证：`test_agent_history.py` 验证旧读写路由始终 404、专用接口拒绝旧 Session；迁移测试验证空库和旧附件库升级后的正文删除与 GC 登记，文件测试覆盖无会话 GC 失败重试。原旧 Graph/混合会话测试随产品删除，专用 Agent 的隔离、确认、并发与文件测试继续保留。
+
+同图多单回归：验证整图独立草稿与字段隔离、提取幂等重放、版本冲突不创建部分子项、同图分页、原子切换保留草稿、逐单确认且不重复识别；前端覆盖待发送缩略图/放大/移除、默认展开截图分组、切换前保存与失败保护。全栈新增同图双草稿逐单确认及只读回看。
+
+共享订单表单回归：普通创建与 Agent 草稿必须使用同一字段组件，验证数值输入、mm/μm 标准化、m/kg 切换不换算数量、其他规格保留。Agent 的保存失败与版本冲突必须保留本地值，确认只能调用工作项命令；基础数据加载失败可重试，未知数量单位不可静默设为 kg。
+
+录单布局验收：在 1366×768 和 1440×900 检查基本信息与创建按钮全部进入视口，常规订单工作区 scrollHeight 不超过 clientHeight；已有配方选择后也应满足。手机仍保留可访问布局，不通过隐藏溢出来冒充一屏展示。
+
+
+截图工作台新增 `test_order_workbench.py`：无聊天模型固定识别、多图原子接续、失败隔离和手动重试、跨服务/纯文字拒绝、Worker失联后后续图继续且迟到写回拒绝、版本冲突终止而不无限入队、最新稿确认并原子选择下一项、确认幂等。坏PNG校验和必须返回422，可移除重选，不能500后陷入不确定重试。
+
+浏览器测试验证截图工作台无消息输入、记录抽屉内容实际进入视口、原图在当前页弹窗、切换保存失败不丢输入、1366×768/1440×900常规表单与确认按钮不滚动。完整联调使用可解码的合成图片，通过实际视觉HTTP适配器、Worker、Graph验证多图/一图多单、手改数量后一次确认即保存并创建、下一笔自动展示、已创建订单只读回看，随后验证人工排单与用户隔离。记录页面截图使用模拟业务数据，不写本地业务库。
+
+
+客户/产品视觉匹配回归：`test_entity_matching.py` 覆盖动态ID枚举、缺少必填选择、空/过大目录、目录实时刷新、虚构ID/无原文依据/低评分/候选接近/重复同名拒绝、基础数据改名后的拒绝、单次视觉调用同图多单填充、人工清空保护及提示生命周期。匹配字段纠错两次失败仍保留有效规格与另一有效选择；连接失败保留安全诊断码。`test_model_transport.py` 区分连接、超时、HTTP、响应结构及JSON错误，验证不泄露上游原文。前端浮层验证除可见性外还用elementFromPoint证明没有被卡片裁剪，覆盖1366px、390px、Escape焦点恢复与归档只读。全栈双单场景经真实HTTP模型适配器验证同次看图选择客户与产品。真实截图匹配需另作只读模型检查，不能以模拟用例声称实际识别准确率。
+
+
+确认弹窗与放弃展示回归：前端协议测试覆盖同图先放弃一笔仍显示另一笔、全部放弃及刷新后截图消失、取消不发请求、关闭失败保留原图和草稿；确认弹窗在录入记录抽屉之上且适配手机；基础数据删除请求期间禁止重复操作和关闭，后端拒绝时弹窗保留原因并可重试。排单确认的协议/全栈测试均操作站内 alertdialog，不自动接受浏览器原生弹窗。
+
+
+截图日分组回归：`test_screenshot_positions.py` 验证北京时间跨日、附件上传时间优先于工作项/识别创建时间、同图多订单、部分/全部放弃、日内连续编号、分页/单条详情的全局排名以及持久队列位置不变。浏览器验证日期和日内排序、源图/放弃提示/识别进度编号一致、放弃后刷新及切换待处理/已下发编号稳定；未识别截图不展示“0笔订单”。
+
+统一截图与归档：`test_screenshot_library.py` 验证跨Session聚合、按图完整分页、全局日编号、用户隔离、整图归档、只读写入拒绝、幂等/版本、运行中拒绝、恢复旧归档Session时保留其他图、队列跳过归档项、工作区复用、事务失败回滚。浏览器覆盖归档确认取消/失败/恢复、手机只读查看与刷新、跨旧Session切换前保存及失败保留、分页刷新；全栈用真实API/Worker验证入口复用、归档/恢复及正式订单数量不变。迁移从空库与历史库升级并做Alembic漂移检查。
+
+
+`tests/test_meter_scheduling.py` 覆盖米数草稿合并、人工调整/确认、原单位保留、m与kg/g/t混合拒绝及失败关联不变、已有米数队列的全候选任务数比较、已完成任务排除、宽幅限制、旧规则草稿拦截与废止提示投影。浏览器验证原米数显示和合并选项过滤；全栈从录单表单以m确认，到按选单生成草稿与生产下发，验证真实订单数量/单位不变。
+
+
+生产状态确认：后端覆盖完成/恢复时整组订单同步、原机器队尾恢复、机器停用/占用拒绝、状态/更新时间/关联集合冲突和待排禁止直改。浏览器覆盖看板开始/完成确认、订单状态选择、取消零写入、失败弹窗保留、手机适配和同任务UI同步；隔离全栈从录单/排单到开始、完成、刷新恢复生产。
+
+
+订单状态投影：桌面/手机同时验证待排单、待生产、生产中、已完成的标签、计数和筛选；详情与列表一致，开始生产后待生产筛选移除该订单、生产中计数增加，刷新仍正确。全栈验证真实任务WAITING的订单显示待生产，明确开工后才显示生产中。
+
+生产撤回回归：后端覆盖整组关联/机器/位置保留、占用释放、重开工校验、过期状态/版本/关联集合拒绝和DONE不能直退WAITING；界面覆盖看板撤回确认取消/失败/刷新，以及订单管理桌面/手机整组同步。隔离全栈验证看板撤回后订单显示待生产并可重新开工。

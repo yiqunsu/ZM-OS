@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # ─── Agent / LLM ──────────────────────────────────────────────────────────
     # OpenAI-compatible contract. The defaults target Alibaba Cloud Model Studio;
@@ -28,14 +29,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen3.7-plus"
     LLM_VISION_MODEL: str = "qwen3-vl-plus"
     LLM_REQUEST_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
-    AGENT_IMAGE_MAX_BYTES: int = Field(default=5 * 1024 * 1024, gt=0)
+    # Maintenance switch; disabling does not restore the retired runtime.
+    AGENT_V2_ENABLED: bool = True
     CHAT_ATTACHMENT_DIR: str = "var/chat-attachments"
-
-    AGENT_RUNTIME: Literal["langgraph", "openclaw"] = "langgraph"
-    OPENCLAW_BASE_URL: str = "http://openclaw:18789"
-    OPENCLAW_GATEWAY_TOKEN: str = ""
-    OPENCLAW_AGENT_ID: str = "filmos-web"
-    OPENCLAW_REQUEST_TIMEOUT_SECONDS: float = 120.0
 
     # ─── Phoenix (Arize) observability ─────────────────────────────────────────
     # Gated like SENTRY_DSN: when disabled the app behaves identically and never
@@ -66,11 +62,6 @@ class Settings(BaseSettings):
                 raise ValueError(f"Casdoor authentication requires: {', '.join(missing)}")
         return self
 
-    @property
-    def checkpointer_dsn(self) -> str:
-        """LangGraph's Postgres checkpointer uses psycopg (not asyncpg), so it needs a
-        plain postgresql:// DSN rather than the app's postgresql+asyncpg:// URL."""
-        return self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
 
 
 settings = Settings()

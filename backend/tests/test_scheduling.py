@@ -89,9 +89,7 @@ async def test_schedule_combines_same_signature_and_explains_unassigned(db_sessi
     db_session.add(missing_width)
     await db_session.commit()
 
-    plan = await schedule_service.create_schedule_plan(
-        db_session, session.id, "test-user"
-    )
+    plan = await schedule_service.create_schedule_plan(db_session, session.id, "test-user")
 
     assert len(plan.tasks) == 1
     assert plan.tasks[0]["machine_id"] == machine.id
@@ -246,9 +244,7 @@ async def test_schedule_balances_actual_order_weight_not_task_count(db_session):
     )
     db_session.add(idle_machine)
     await db_session.flush()
-    db_session.add(
-        MachineCategory(machine_id=idle_machine.id, category_id=product.category_id)
-    )
+    db_session.add(MachineCategory(machine_id=idle_machine.id, category_id=product.category_id))
     queued_task = ProductionTask(
         machine_id=loaded_machine.id,
         position=1,
@@ -289,25 +285,23 @@ async def test_apply_schedule_plan_creates_all_tasks_and_updates_orders(db_sessi
     refreshed_plan = await db_session.get(SchedulePlan, plan.id)
     refreshed_orders = list(
         (
-            await db_session.execute(
-                select(Order).where(Order.id.in_([order.id for order in orders]))
-            )
+            await db_session.execute(select(Order).where(Order.id.in_([order.id for order in orders])))
         ).scalars()
     )
     assert refreshed_plan.status == SchedulePlanStatus.APPLIED
     assert all(order.status == OrderStatus.PRODUCING and order.task_id for order in refreshed_orders)
 
 
-async def test_apply_schedule_plan_is_atomic_when_second_task_flush_fails(
-    db_session, monkeypatch
-):
+async def test_apply_schedule_plan_is_atomic_when_second_task_flush_fails(db_session, monkeypatch):
     session, machine, orders = await _setup_schedulable(db_session, widths=(500, 500))
     plan = SchedulePlan(
         session_id=session.id,
         created_by_id="test-user",
         status=SchedulePlanStatus.DRAFT,
         input_order_ids=[order.id for order in orders],
-        input_fingerprint={order.id: order.updated_at.isoformat() for order in orders},
+        input_fingerprint=schedule_service._input_fingerprint(
+            await schedule_service._load_orders(db_session), await schedule_service._load_machines(db_session)
+        ),
         tasks=[
             {
                 "machine_id": machine.id,
@@ -342,14 +336,12 @@ async def test_apply_schedule_plan_is_atomic_when_second_task_flush_fails(
     await db_session.rollback()
 
     task_count = await db_session.scalar(
-        select(func.count()).select_from(ProductionTask).where(
-            ProductionTask.notes == f"智能排产方案 {plan_id}"
-        )
+        select(func.count())
+        .select_from(ProductionTask)
+        .where(ProductionTask.notes == f"智能排产方案 {plan_id}")
     )
     refreshed_orders = list(
-        (
-            await db_session.execute(select(Order).where(Order.id.in_(order_ids)))
-        ).scalars()
+        (await db_session.execute(select(Order).where(Order.id.in_(order_ids)))).scalars()
     )
     assert task_count == 0
     assert all(order.status == OrderStatus.PENDING and order.task_id is None for order in refreshed_orders)
@@ -421,7 +413,7 @@ async def test_apply_rejects_when_machine_queue_changes(db_session):
     await db_session.rollback()
 
 
-async def test_confirm_schedule_clears_workspace_in_same_commit(client, db_session):
+async def test_retired_schedule_confirmation_cannot_execute(client, db_session):
     session, _machine, _orders = await _setup_schedulable(db_session)
     session_id = session.id
     session.active_workspace = "schedule_plan"
@@ -447,8 +439,11 @@ async def test_confirm_schedule_clears_workspace_in_same_commit(client, db_sessi
         json={"session_id": session_id},
     )
 
-    assert response.status_code == 200
-    assert '"type": "schedule_applied"' in response.text
+    assert response.status_code == 404
+    assert await db_session.scalar(select(func.count()).select_from(ProductionTask)) == 0
     db_session.expire_all()
     refreshed_session = await db_session.get(ChatSession, session_id)
-    assert refreshed_session.active_workspace is None
+    assert refreshed_session.active_workspace == "schedule_plan"
+
+    cancelled = await client.post("/api/agent/chat/cancel", json={"session_id": session_id})
+    assert cancelled.status_code == 404

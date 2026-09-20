@@ -15,7 +15,7 @@ FilmOS 需要正式的登录、用户与角色管理能力，并要在后续接�
 - FilmOS PostgreSQL 保留本地 `users.id` 作为业务归属标识。首次登录按已验证的规范化邮箱关联一次，此后只按 OIDC `sub` 识别；
 - Casdoor 使用同一 PostgreSQL 服务中的独立数据库与独立登录角色，以独立容器运行；
 - Auth.js 保存八小时加密会话，Casdoor access token 有效期十五分钟、refresh token 有效期二十四小时；refresh token 不进入浏览器 Session；
-- OpenClaw 不接收 Casdoor Token，也不获得数据库或用户管理权限。
+- 模型服务不接收 Casdoor Token，也不获得数据库或用户管理权限。
 
 第一版权限为：OWNER 与 OPERATOR 均可读取业务数据、管理订单与生产任务、使用自己的 Agent 会话；只有 OWNER 可以修改基础数据；账号与角色通过 Casdoor 组织后台管理。
 

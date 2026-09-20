@@ -75,7 +75,7 @@ async def test_delete_machine_blocked_when_tasks_exist(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {"宽度": "400mm"},
+                "spec_params": {"宽度": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
             },

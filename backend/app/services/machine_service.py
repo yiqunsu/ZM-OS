@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Machine, MachineCategory, MachinePattern, ProductionTask
 from app.schemas.machine import MachineOut
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 _LOAD_OPTS = (
     selectinload(Machine.category_links).selectinload(MachineCategory.category),
@@ -34,6 +35,7 @@ async def create_machine(
     category_ids: list[str],
     pattern_ids: list[str],
 ) -> Machine:
+    await lock_scheduling_inputs(db)
     _validate(name, min_width, max_width)
     machine = Machine(
         name=name.strip(),
@@ -65,6 +67,7 @@ async def update_machine(
     category_ids: list[str],
     pattern_ids: list[str],
 ) -> Machine:
+    await lock_scheduling_inputs(db)
     _validate(name, min_width, max_width)
     machine = await db.get(Machine, machine_id)
     if machine is None:
@@ -90,6 +93,7 @@ async def update_machine(
 
 
 async def delete_machine(db: AsyncSession, machine_id: str) -> None:
+    await lock_scheduling_inputs(db)
     task_count = await db.scalar(
         select(func.count()).select_from(ProductionTask).where(ProductionTask.machine_id == machine_id)
     )

@@ -34,10 +34,119 @@ from app.services.production_rules import (
 from app.services.production_rules import (
     order_profile as _order_info,
 )
+from app.services.scheduling_lock import lock_scheduling_inputs
+
+SCHEDULING_RULE_VERSION = 3
 
 _PENDING_SET_KEY = "__pending_order_set__"
 _ACTIVE_MACHINE_SET_KEY = "__active_machine_set__"
 _MACHINE_KEY_PREFIX = "machine:"
+
+
+def plan_revision(plan: SchedulePlan) -> str:
+    return _stable_hash({"tasks": plan.tasks, "unassigned": plan.unassigned})
+
+
+def plan_payload(plan: SchedulePlan) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "status": plan.status.value,
+        "tasks": plan.tasks,
+        "unassigned": plan.unassigned,
+        "created_at": plan.created_at.isoformat(),
+        "revision": plan_revision(plan),
+    }
+
+
+async def require_plan(
+    db: AsyncSession,
+    plan_id: str,
+    user_id: str,
+    *,
+    lock: bool = False,
+    allow_v2: bool = False,
+) -> SchedulePlan:
+    stmt = select(SchedulePlan).where(
+        SchedulePlan.id == plan_id,
+        SchedulePlan.created_by_id == user_id,
+    )
+    if not allow_v2:
+        stmt = stmt.where(SchedulePlan.created_by_run_id.is_(None))
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    plan = (await db.execute(stmt)).scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(404, "排产方案不存在")
+    return plan
+
+
+async def plan_is_stale(db: AsyncSession, plan: SchedulePlan) -> bool:
+    orders = await _load_orders(db)
+    scoped = plan.input_fingerprint.get("__selection_scope__", False)
+    if scoped:
+        orders = [order for order in orders if order.id in plan.input_order_ids]
+    fingerprint = _input_fingerprint(orders, await _load_machines(db))
+    if scoped:
+        fingerprint["__selection_scope__"] = True
+    return plan.input_fingerprint != fingerprint
+
+
+async def update_schedule_draft(
+    db: AsyncSession,
+    plan_id: str,
+    user_id: str,
+    revision: str,
+    tasks: list[dict],
+    *,
+    commit: bool = True,
+    allow_v2: bool = False,
+) -> SchedulePlan:
+    plan = await require_plan(db, plan_id, user_id, lock=True, allow_v2=allow_v2)
+    await lock_scheduling_inputs(db)
+    if plan.status != SchedulePlanStatus.DRAFT or revision != plan_revision(plan):
+        raise HTTPException(409, "草案已被修改或执行，请重新加载")
+    if await plan_is_stale(db, plan):
+        raise HTTPException(409, "生产数据已变化，请重新生成方案")
+    orders = {order.id: order for order in await _load_orders(db)}
+    machines = {machine.id: machine for machine in await _load_machines(db)}
+    assigned: set[str] = set()
+    normalized = []
+    for task in tasks:
+        machine = machines.get(task["machine_id"])
+        if machine is None:
+            raise HTTPException(409, "机器不存在或已停用")
+        ids = task["order_ids"]
+        if any(key in assigned for key in ids) or len(ids) != len(set(ids)):
+            raise HTTPException(409, "草案中存在重复订单")
+        if any(key not in plan.input_order_ids or key not in orders for key in ids):
+            raise HTTPException(409, "订单不属于本草案")
+        batch = [orders[key] for key in ids]
+        width = validate_machine_batch(machine, batch)
+        assigned.update(ids)
+        normalized.append(
+            {
+                "machine_id": machine.id,
+                "machine_name": machine.name,
+                "order_ids": ids,
+                "order_nos": [order.order_no for order in batch],
+                "total_width": width,
+                "width_utilization": round(width / machine.max_width, 4),
+                "total_quantity_kg": _batch_quantity_kg(batch),
+                "total_quantity_m": sum(float(order.quantity) for order in batch if order.unit == "m"),
+                "reason": "人工调整；已通过机器能力与合并规则校验",
+            }
+        )
+    plan.tasks = normalized
+    plan.unassigned = [
+        {"order_id": key, "order_no": orders[key].order_no, "reason": "尚未安排到草案任务"}
+        for key in plan.input_order_ids
+        if key not in assigned
+    ]
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
+    return plan
 
 
 @dataclass(slots=True)
@@ -45,7 +154,8 @@ class MachineState:
     machine: Machine
     category_ids: set[str]
     pattern_names: set[str]
-    load_kg: float
+    load_kg: float | None
+    task_count: int
     last_signature: ProductionSignature | None
     last_width: float | None
 
@@ -61,10 +171,16 @@ def _changeover_key(
     state: MachineState,
     signature: ProductionSignature,
     total_width: float,
-    batch_load_kg: float,
+    batch_load_kg: float | None,
+    task_count_basis: bool,
 ) -> tuple[int, int, int, int, int, float, float, str, str]:
     previous = state.last_signature
     unused_ratio = (state.machine.max_width - total_width) / state.machine.max_width
+    if task_count_basis:
+        load = state.task_count + 1
+    else:
+        assert state.load_kg is not None and batch_load_kg is not None
+        load = state.load_kg + batch_load_kg
     return (
         int(previous is not None and previous.material != signature.material),
         int(previous is not None and previous.category_id != signature.category_id),
@@ -72,7 +188,7 @@ def _changeover_key(
         int(previous is not None and previous.pattern.casefold() != signature.pattern.casefold()),
         int(state.last_width is not None and state.last_width != total_width),
         round(unused_ratio, 6),
-        state.load_kg + batch_load_kg,
+        load,
         state.machine.name,
         state.machine.id,
     )
@@ -106,8 +222,26 @@ def _reason(
     return f"{prefix}；{detail}；幅宽利用率 {utilization:.1f}%"
 
 
-def _quantity_kg(order: Order) -> float:
-    return float(order.quantity) * (1000 if order.unit == "t" else 1)
+def _quantity_kg(order: Order) -> float | None:
+    factor = {"t": 1000, "kg": 1, "g": 0.001}.get(order.unit)
+    return float(order.quantity) * factor if factor is not None else None
+
+
+def _batch_quantity_kg(orders: list[Order]) -> float | None:
+    weights = [_quantity_kg(order) for order in orders]
+    return None if any(weight is None for weight in weights) else sum(weights)
+
+
+def _load_basis(orders: list[Order], machines: list[Machine]) -> str:
+    # All candidate machines must use the same comparable tie-breaker.
+    queued = [
+        order
+        for machine in machines
+        for task in machine.tasks
+        if task.status != TaskStatus.DONE
+        for order in task.orders
+    ]
+    return "TASK_COUNT" if any(_quantity_kg(order) is None for order in [*orders, *queued]) else "WEIGHT_KG"
 
 
 def _last_task_signature(machine: Machine) -> tuple[ProductionSignature | None, float | None]:
@@ -162,12 +296,15 @@ def _machine_states(machines: list[Machine]) -> list[MachineState]:
                 machine=machine,
                 category_ids={link.category_id for link in machine.category_links},
                 pattern_names={link.pattern.name.strip().casefold() for link in machine.pattern_links},
-                load_kg=sum(
-                    _quantity_kg(order)
-                    for task in machine.tasks
-                    if task.status != TaskStatus.DONE
-                    for order in task.orders
+                load_kg=_batch_quantity_kg(
+                    [
+                        order
+                        for task in machine.tasks
+                        if task.status != TaskStatus.DONE
+                        for order in task.orders
+                    ]
                 ),
+                task_count=sum(task.status != TaskStatus.DONE for task in machine.tasks),
                 last_signature=signature,
                 last_width=width,
             )
@@ -184,9 +321,7 @@ def _unassigned_reason(info: OrderInfo, states: list[MachineState]) -> str:
     pattern = info.signature.pattern
     compatible_states = category_states
     if pattern:
-        compatible_states = [
-            state for state in category_states if pattern.casefold() in state.pattern_names
-        ]
+        compatible_states = [state for state in category_states if pattern.casefold() in state.pattern_names]
         if not compatible_states:
             return f"没有机器具备“{pattern}”花纹能力"
     max_width = max(state.machine.max_width for state in compatible_states)
@@ -224,9 +359,7 @@ def _select_batch(
         if batch and total_width >= state.machine.min_width:
             selected_ids = {info.order.id for info in batch}
             ordered_batch = [info for info in remaining if info.order.id in selected_ids]
-            indexes = tuple(
-                index for index, info in enumerate(remaining) if info.order.id in selected_ids
-            )
+            indexes = tuple(index for index, info in enumerate(remaining) if info.order.id in selected_ids)
             if total_width > best_width or (
                 total_width == best_width and (not best_indexes or indexes < best_indexes)
             ):
@@ -239,6 +372,7 @@ def _select_batch(
 def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dict], list[dict]]:
     states = _machine_states(machines)
     infos = [_order_info(order) for order in orders]
+    task_count_basis = _load_basis(orders, machines) == "TASK_COUNT"
     unassigned: list[dict] = []
     schedulable: list[OrderInfo] = []
     for info in infos:
@@ -253,13 +387,13 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
         else:
             schedulable.append(info)
 
-    groups: dict[tuple[ProductionSignature, str | None], list[OrderInfo]] = defaultdict(list)
+    groups: dict[tuple[ProductionSignature, bool, str | None], list[OrderInfo]] = defaultdict(list)
     for info in schedulable:
         discriminator = None if info.signature.complete_for_merge else info.order.id
-        groups[(info.signature, discriminator)].append(info)
+        groups[(info.signature, info.order.unit == "m", discriminator)].append(info)
 
     tasks: list[dict] = []
-    for (signature, _discriminator), group in groups.items():
+    for (signature, _meter, _discriminator), group in groups.items():
         remaining = list(group)
         while remaining:
             candidates: list[tuple[tuple[Any, ...], MachineState, list[OrderInfo], float]] = []
@@ -268,7 +402,7 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                     continue
                 batch, total_width = _select_batch(remaining, state)
                 if batch:
-                    batch_load_kg = sum(_quantity_kg(info.order) for info in batch)
+                    batch_load_kg = _batch_quantity_kg([info.order for info in batch])
                     candidates.append(
                         (
                             _changeover_key(
@@ -276,6 +410,7 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                                 signature,
                                 total_width,
                                 batch_load_kg,
+                                task_count_basis,
                             ),
                             state,
                             batch,
@@ -295,8 +430,10 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                 break
 
             _, state, batch, total_width = min(candidates, key=lambda item: item[0])
-            batch_load_kg = sum(_quantity_kg(info.order) for info in batch)
+            batch_load_kg = _batch_quantity_kg([info.order for info in batch])
             reason = _reason(state, signature, len(batch), total_width)
+            if task_count_basis:
+                reason += "；同等条件下按未完成任务数粗略比较负载，不代表预计工时"
             tasks.append(
                 {
                     "machine_id": state.machine.id,
@@ -306,10 +443,18 @@ def _build_tasks(orders: list[Order], machines: list[Machine]) -> tuple[list[dic
                     "total_width": total_width,
                     "width_utilization": round(total_width / state.machine.max_width, 4),
                     "total_quantity_kg": batch_load_kg,
+                    "total_quantity_m": sum(
+                        float(info.order.quantity) for info in batch if info.order.unit == "m"
+                    ),
                     "reason": reason,
                 }
             )
-            state.load_kg += batch_load_kg
+            state.load_kg = (
+                state.load_kg + batch_load_kg
+                if state.load_kg is not None and batch_load_kg is not None
+                else None
+            )
+            state.task_count += 1
             state.last_signature = signature
             state.last_width = total_width
             selected_order_ids = {info.order.id for info in batch}
@@ -347,9 +492,7 @@ def _machine_fingerprint(machine: Machine) -> str:
                     "position": task.position,
                     "status": task.status.value,
                     "updated_at": task.updated_at.isoformat(),
-                    "orders": sorted(
-                        (order.id, order.updated_at.isoformat()) for order in task.orders
-                    ),
+                    "orders": sorted((order.id, order.updated_at.isoformat()) for order in task.orders),
                 }
                 for task in active_tasks
             ],
@@ -357,15 +500,31 @@ def _machine_fingerprint(machine: Machine) -> str:
     )
 
 
-def _input_fingerprint(orders: list[Order], machines: list[Machine]) -> dict[str, str]:
+def _input_fingerprint(orders: list[Order], machines: list[Machine]) -> dict[str, Any]:
     fingerprint = {order.id: order.updated_at.isoformat() for order in orders}
+    fingerprint["schema_version"] = 1
+    fingerprint["__scheduling_rules__"] = SCHEDULING_RULE_VERSION
+    fingerprint["__load_basis__"] = _load_basis(orders, machines)
+    fingerprint["__order_contents__"] = _stable_hash(
+        [
+            {
+                "id": order.id,
+                "quantity": order.quantity,
+                "unit": order.unit,
+                "spec": order.spec_params,
+                "formula": order.formula_snapshot,
+                "product": order.product_id,
+                "category": order.product.category_id,
+                "customer": order.customer_id,
+                "formula_id": order.formula_id,
+            }
+            for order in sorted(orders, key=lambda item: item.id)
+        ]
+    )
     fingerprint[_PENDING_SET_KEY] = _stable_hash(sorted(order.id for order in orders))
     fingerprint[_ACTIVE_MACHINE_SET_KEY] = _stable_hash(sorted(machine.id for machine in machines))
     fingerprint.update(
-        {
-            f"{_MACHINE_KEY_PREFIX}{machine.id}": _machine_fingerprint(machine)
-            for machine in machines
-        }
+        {f"{_MACHINE_KEY_PREFIX}{machine.id}": _machine_fingerprint(machine) for machine in machines}
     )
     return fingerprint
 
@@ -374,11 +533,21 @@ async def create_schedule_plan(
     db: AsyncSession,
     session_id: str,
     user_id: str,
+    *,
+    commit: bool = True,
+    order_ids: list[str] | None = None,
 ) -> SchedulePlan:
     orders = await _load_orders(db)
+    if order_ids is not None:
+        selected = set(order_ids)
+        if not selected or len(selected) != len(order_ids) or not selected <= {order.id for order in orders}:
+            raise HTTPException(409, "选中的订单已变化，请刷新后重新选择")
+        orders = [order for order in orders if order.id in selected]
     machines = await _load_machines(db)
     tasks, unassigned = _build_tasks(orders, machines)
     fingerprint = _input_fingerprint(orders, machines)
+    if order_ids is not None:
+        fingerprint["__selection_scope__"] = True
     plan = SchedulePlan(
         session_id=session_id,
         created_by_id=user_id,
@@ -389,8 +558,11 @@ async def create_schedule_plan(
         unassigned=unassigned,
     )
     db.add(plan)
-    await db.commit()
-    await db.refresh(plan)
+    if commit:
+        await db.commit()
+        await db.refresh(plan)
+    else:
+        await db.flush()
     return plan
 
 
@@ -434,6 +606,8 @@ async def apply_schedule_plan(
     db: AsyncSession,
     plan_id: str,
     user_id: str,
+    *,
+    allow_v2: bool = False,
 ) -> dict[str, Any]:
     plan = (
         await db.execute(
@@ -442,10 +616,13 @@ async def apply_schedule_plan(
             .with_for_update()
         )
     ).scalar_one_or_none()
-    if plan is None:
+    if plan is None or (plan.created_by_run_id is not None and not allow_v2):
         raise HTTPException(404, "排产方案不存在")
     if plan.status != SchedulePlanStatus.DRAFT:
         raise HTTPException(409, "排产方案已执行，不能重复确认")
+    await lock_scheduling_inputs(db)
+    if plan.input_fingerprint.get("__scheduling_rules__") != SCHEDULING_RULE_VERSION:
+        raise HTTPException(409, "排单规则已更新，请重新生成草稿")
     if not plan.tasks:
         raise HTTPException(409, "排产方案没有可执行任务")
 
@@ -492,6 +669,8 @@ async def apply_schedule_plan(
             )
         ).scalars()
     )
+    if plan.input_fingerprint.get("__selection_scope__"):
+        current_pending_ids = [oid for oid in current_pending_ids if oid in plan.input_order_ids]
     expected_pending_set = plan.input_fingerprint.get(_PENDING_SET_KEY)
     if expected_pending_set and expected_pending_set != _stable_hash(current_pending_ids):
         raise HTTPException(409, "排产方案已过期：待排订单集合已发生变化，请重新生成方案")
@@ -504,6 +683,10 @@ async def apply_schedule_plan(
     )
     orders = list(order_result.scalars().all())
     orders_by_id = {order.id: order for order in orders}
+    expected_contents = plan.input_fingerprint.get("__order_contents__")
+    current_contents = _input_fingerprint(orders, active_machines)["__order_contents__"]
+    if expected_contents and expected_contents != current_contents:
+        raise HTTPException(409, "排产方案已过期：订单内容已变化")
     if set(orders_by_id) != set(plan.input_order_ids):
         raise HTTPException(409, "排产方案已过期：部分订单已不存在")
     for order in orders:
@@ -527,9 +710,7 @@ async def apply_schedule_plan(
     next_positions: dict[str, int] = {}
     for machine_id in machine_ids:
         max_position = await db.scalar(
-            select(func.max(ProductionTask.position)).where(
-                ProductionTask.machine_id == machine_id
-            )
+            select(func.max(ProductionTask.position)).where(ProductionTask.machine_id == machine_id)
         )
         next_positions[machine_id] = (max_position or 0) + 1
 

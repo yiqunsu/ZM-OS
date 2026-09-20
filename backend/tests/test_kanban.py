@@ -41,7 +41,7 @@ async def test_kanban_lists_unassigned_pending_orders(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {},
+                "spec_params": {"宽幅": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
             },
@@ -72,7 +72,7 @@ async def test_kanban_hides_done_tasks_but_keeps_producing(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {"宽度": "400mm"},
+                "spec_params": {"宽度": "400mm", "厚度": "50μm"},
                 "quantity": 100,
                 "unit": "kg",
             },
@@ -84,7 +84,7 @@ async def test_kanban_hides_done_tasks_but_keeps_producing(client):
             json={
                 "customer_id": cust["id"],
                 "product_id": prod["id"],
-                "spec_params": {"宽度": "400mm"},
+                "spec_params": {"宽度": "400mm", "厚度": "50μm"},
                 "quantity": 50,
                 "unit": "kg",
             },

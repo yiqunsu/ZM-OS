@@ -1,4 +1,0 @@
-{"file":".trellis/spec/backend/core/quality-guidelines.md","reason":"Verify backend and container-facing changes against the backend quality gate."}
-{"file":".trellis/spec/backend/core/database-guidelines.md","reason":"Verify migration, persistence, backup, and restore behavior against database contracts."}
-{"file":".trellis/spec/backend/core/logging-guidelines.md","reason":"Verify production logging stays structured, bounded, and free of secrets."}
-{"file":".trellis/spec/frontend/ui/quality-guidelines.md","reason":"Verify the production frontend build and runtime configuration without weakening frontend checks."}

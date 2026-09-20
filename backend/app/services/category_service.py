@@ -3,6 +3,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import MachineCategory, Product, ProductCategory
+from app.services.scheduling_lock import lock_scheduling_inputs
 
 
 async def list_categories(db: AsyncSession) -> list[ProductCategory]:
@@ -20,9 +21,7 @@ async def create_category(db: AsyncSession, name: str, desc: str | None) -> Prod
     return category
 
 
-async def update_category(
-    db: AsyncSession, category_id: str, name: str, desc: str | None
-) -> ProductCategory:
+async def update_category(db: AsyncSession, category_id: str, name: str, desc: str | None) -> ProductCategory:
     if not name.strip():
         raise HTTPException(400, "大类名称为必填项")
     category = await db.get(ProductCategory, category_id)
@@ -36,6 +35,7 @@ async def update_category(
 
 
 async def delete_category(db: AsyncSession, category_id: str) -> None:
+    await lock_scheduling_inputs(db)
     product_count = await db.scalar(
         select(func.count()).select_from(Product).where(Product.category_id == category_id)
     )

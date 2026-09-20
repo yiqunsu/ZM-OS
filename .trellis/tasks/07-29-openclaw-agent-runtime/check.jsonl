@@ -1,6 +1,0 @@
-{"file":"meta/GROUND_TRUTH.md","reason":"Verify business authority, authentication, and data ownership boundaries."}
-{"file":"meta/ENGINEERING_RULES.md","reason":"Verify layering, security, error handling, logging, and deployment compliance."}
-{"file":"meta/TESTING.md","reason":"Verify required lint, tests, migrations, frontend, and Compose checks."}
-{"file":".trellis/spec/backend/core/quality-guidelines.md","reason":"Backend correctness and rejection-path review checklist."}
-{"file":".trellis/spec/backend/core/logging-guidelines.md","reason":"Ensure Gateway failures are observable without exposing secrets or prompts."}
-{"file":".trellis/tasks/07-29-openclaw-agent-runtime/design.md","reason":"Check implementation against the approved architecture and rollback contract."}

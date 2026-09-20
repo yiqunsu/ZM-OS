@@ -1,4 +1,5 @@
 "use client";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -20,27 +21,6 @@ const AVATAR_COLORS = [
 ];
 function avatarColor(id: string) {
   return AVATAR_COLORS[(id.charCodeAt(0) + id.charCodeAt(id.length - 1)) % AVATAR_COLORS.length];
-}
-
-/* ─── 通用小型 Dialog ─── */
-function ConfirmDeleteDialog({
-  open, name, extra, onCancel, onConfirm,
-}: { open: boolean; name: string; extra?: string; onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader><DialogTitle className="text-slate-800">确认删除</DialogTitle></DialogHeader>
-        <p className="text-sm text-slate-500 py-2">
-          确定删除「<span className="font-medium text-slate-700">{name}</span>」吗？
-          {extra && <span className="block mt-1 text-xs text-slate-400">{extra}</span>}
-        </p>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel} className="border-slate-200 text-slate-600">取消</Button>
-          <Button onClick={onConfirm} className="bg-red-500 hover:bg-red-600 text-white border-0">删除</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 /* ══════════════════════════════
@@ -77,7 +57,7 @@ function CategorySection({
       await api.delete(`/product-categories/${deleteTarget.id}`);
       setDeleteTarget(null); onReload();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "删除失败");
+      throw new Error(e instanceof ApiError ? e.message : "删除失败，请重试");
     }
   }
 
@@ -163,10 +143,9 @@ function CategorySection({
         </DialogContent>
       </Dialog>
 
-      <ConfirmDeleteDialog
+      <ConfirmDialog title="删除产品大类？"
         open={deleteTarget !== null}
-        name={deleteTarget?.name ?? ""}
-        extra="若该大类下存在产品，则无法删除"
+        description={`将删除产品大类「${deleteTarget?.name ?? ""}」，无法撤销。若该大类下存在产品，则无法删除。`}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
       />
@@ -188,7 +167,6 @@ function ProductSection({
   const [error, setError]                   = useState("");
   const [selected, setSelected]             = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [bulkDeleting, setBulkDeleting]     = useState(false);
   const [filterCategoryId, setFilterCategoryId] = useState("");
 
   const filtered = filterCategoryId ? products.filter((p) => p.category_id === filterCategoryId) : products;
@@ -232,27 +210,24 @@ function ProductSection({
       await api.delete(`/products/${deleteTarget.id}`);
       setDeleteTarget(null); onReload();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "删除失败");
+      throw new Error(e instanceof ApiError ? e.message : "删除失败，请重试");
     }
   }
 
   async function handleBulkDelete() {
-    setBulkDeleting(true);
-    const ids = [...selected];
+    const failed: string[] = [];
     const errors: string[] = [];
-    for (const id of ids) {
-      try {
-        await api.delete(`/products/${id}`);
-      } catch {
-        const p = products.find((x) => x.id === id);
-        errors.push(p?.name ?? id);
+    for (const id of selected) {
+      try { await api.delete(`/products/${id}`); }
+      catch (e) {
+        failed.push(id);
+        errors.push(`${products.find((p) => p.id === id)?.name ?? id}：${e instanceof ApiError ? e.message : "删除失败"}`);
       }
     }
-    setBulkDeleting(false);
+    setSelected(new Set(failed));
+    await onReload();
+    if (errors.length) throw new Error(`以下产品未删除，其余已删除：\n${errors.join("\n")}`);
     setBulkDeleteOpen(false);
-    setSelected(new Set());
-    onReload();
-    if (errors.length > 0) alert(`以下产品删除失败（存在关联订单或配方）：\n${errors.join("、")}`);
   }
 
   return (
@@ -415,30 +390,17 @@ function ProductSection({
       </Dialog>
 
       {/* 单条删除 */}
-      <ConfirmDeleteDialog
+      <ConfirmDialog title="删除产品？"
         open={deleteTarget !== null}
-        name={deleteTarget?.name ?? ""}
-        extra="若该产品存在关联订单或配方，则无法删除"
+        description={`将删除产品「${deleteTarget?.name ?? ""}」，无法撤销。若该产品存在关联订单或配方，则无法删除。`}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
       />
 
       {/* 批量删除 */}
-      <Dialog open={bulkDeleteOpen} onOpenChange={(o) => !o && setBulkDeleteOpen(false)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="text-slate-800">批量删除</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500 py-2">
-            确定删除选中的 <span className="font-semibold text-slate-700">{selected.size}</span> 个产品吗？
-            <span className="block mt-1 text-xs text-slate-400">存在关联订单或配方的产品将跳过并提示。</span>
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)} className="border-slate-200 text-slate-600">取消</Button>
-            <Button onClick={handleBulkDelete} disabled={bulkDeleting} className="bg-red-500 hover:bg-red-600 text-white border-0">
-              {bulkDeleting ? "删除中…" : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog open={bulkDeleteOpen} title="删除所选产品？"
+        description={`将逐个删除选中的 ${selected.size} 个产品，无法撤销。有关联订单或配方的产品会保留；删除失败的项目会列出供重试。`}
+        onCancel={() => setBulkDeleteOpen(false)} onConfirm={handleBulkDelete} />
     </div>
   );
 }
@@ -451,15 +413,19 @@ export default function ProductTab() {
   const [products, setProducts]     = useState<Product[]>([]);
   const [loading, setLoading]       = useState(true);
 
+  const [loadError, setLoadError] = useState("");
   async function load() {
-    setLoading(true);
-    const [c, p] = await Promise.all([
-      api.get<Category[]>("/product-categories"),
-      api.get<Product[]>("/products"),
-    ]);
-    setCategories(c);
-    setProducts(p);
-    setLoading(false);
+    // Refresh in place: an open deletion dialog must survive partial failures.
+    setLoadError("");
+    try {
+      const [c, p] = await Promise.all([
+        api.get<Category[]>("/product-categories"), api.get<Product[]>("/products"),
+      ]);
+      setCategories(c);
+      setProducts(p);
+    } catch (e) {
+      setLoadError(e instanceof ApiError ? e.message : "产品列表加载失败，请重试");
+    } finally { setLoading(false); }
   }
 
   useEffect(() => {
@@ -473,6 +439,7 @@ export default function ProductTab() {
 
   return (
     <div className="space-y-6">
+      {loadError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{loadError} <button className="underline" onClick={() => void load()}>重试</button></p>}
       <CategorySection categories={categories} onReload={load} />
       <ProductSection   products={products} categories={categories} onReload={load} />
     </div>

@@ -1,6 +1,7 @@
 import asyncpg
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import get_db
@@ -27,7 +28,13 @@ async def _prepare_schema():
     await _ensure_test_db()
     engine = create_async_engine(TEST_DB_URL)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        # Reflect the actual test schema: newly added cyclic FKs may not exist yet.
+        def reset_schema(sync_conn):
+            current = MetaData()
+            current.reflect(sync_conn)
+            current.drop_all(sync_conn)
+
+        await conn.run_sync(reset_schema)
         await conn.run_sync(Base.metadata.create_all)
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         session.add(
