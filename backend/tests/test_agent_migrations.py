@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -22,7 +23,9 @@ async def alembic(db_name: str, *args: str) -> None:
         "AUTH_PROVIDER": "local",
     }
     process = await asyncio.create_subprocess_exec(
-        str(BACKEND / "venv/bin/alembic"),
+        sys.executable,
+        "-m",
+        "alembic",
         *args,
         cwd=BACKEND,
         env=env,
