@@ -1,8 +1,8 @@
 # FilmOS production deployment
 
-> 发布前先阅读 [development 部署与验收](DEVELOPMENT.md)，并配置 `LLM_*` 模型参数。
+> 日常发布只需拉取代码并运行 `./deploy/production/scripts/deploy.sh`，见第 6 节。
 
-本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、Casdoor 和 PostgreSQL 组成；Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
+本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、AI Worker、Casdoor 和 PostgreSQL 组成；后端与 Worker 共用镜像。Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 
 ICP备案通过前，Caddy 只监听服务器 `127.0.0.1`，必须通过 SSH 隧道访问。备案通过前不要添加公网 DNS，也不要开放公网 80/443。
 
@@ -56,6 +56,19 @@ openssl rand -base64 32 # 两个 Casdoor 初始账号密码
 - `LLM_API_KEY`：后端 Agent 使用的模型 API Key。
 
 `NEXT_PUBLIC_API_URL` 是写入前端浏览器 bundle 的构建期 API base，默认同源 `/api`。只有在 API 使用其他公开 origin 时才需要覆盖；修改后必须重新运行部署脚本以重建前端镜像，不能只重启容器。
+
+使用 DeepSeek 官方 API 时，在服务器私有配置中设置：
+
+```dotenv
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-flash
+LLM_VISION_MODEL=deepseek-flash
+LLM_VISION_THINKING=disabled
+LLM_VISION_MAX_TOKENS=8192
+LLM_REQUEST_TIMEOUT_SECONDS=60
+```
+
+另外填写自己的 `LLM_API_KEY`。模型参数应与本地验证时一致；修改后重新运行部署脚本，使后端和 Worker 同时更新。thinking 对官方 DeepSeek 显式设置，不再按模型别名猜测；其他供应商不发送该扩展。
 
 可选的电脑微信扫码登录还需要微信开放平台审核通过的“网站应用”凭证：
 
@@ -174,12 +187,26 @@ WECHAT_OPEN_APP_SECRET=
 
 ## 6. 日常更新、健康和日志
 
+在服务器的 `/opt/filmos` 中执行。先确认处于 `main`，检查未提交改动；环境文件保留在服务器上，不要再次复制模板覆盖。
+
 ```bash
 cd /opt/filmos
 git status --short
 git pull --ff-only
 ./deploy/production/scripts/deploy.sh
+```
 
+脚本只负责配置校验、顺序构建、登录服务准备、已有数据备份、数据库迁移、启动和健康/数据库结构检查。不会自动调用付费模型，也不生成发布报告或要求本地/云端报告对照。成功后在网页上检查登录和一次 AI 操作；容器健康不等于模型功能已验证。
+
+前后端固定使用 `production` 镜像标签，后端和 Worker 共用一个镜像。每次都让 Docker 检查构建缓存，因此同一提交修改前端域名参数也会重新构建对应步骤。Git revision 仅作镜像内版本记录；未提交改动会显示警告并标记 `-dirty`，不会自动清理或阻止发布。推荐从已提交的 `main` 发布。
+
+后端保留 `requirements.lock` 固定依赖版本，使用 BuildKit 下载缓存；变更代码或版本号不会使依赖安装层失效，安装失败后再次构建也可复用已缓存下载。首次仍需从软件源下载，缓存不能保证云端网络一定可用。不要用 `--no-cache` 或清理构建缓存来处理下载慢。
+
+构建失败会停在切换服务之前；备份失败不会执行迁移；迁移失败不会启动新应用。失败时保留日志，不删除数据库卷、不自动恢复备份。固定标签不提供按 Git 标签直接回滚镜像的能力；需要回退时检出兼容的旧提交并重新构建，数据库另行评估。
+
+查看状态与日志：
+
+```bash
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml ps
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 casdoor
 docker compose --env-file deploy/production/.env.production -f deploy/production/compose.yml logs --tail=100 backend

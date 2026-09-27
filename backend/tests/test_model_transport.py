@@ -1,7 +1,22 @@
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.agent import model_transport
+from app.core.config import Settings
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"LLM_VISION_THINKING": "yes"},
+        {"LLM_VISION_MAX_TOKENS": 0},
+        {"LLM_REQUEST_TIMEOUT_SECONDS": 0},
+    ],
+)
+def test_invalid_operational_settings_fail_early(options):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **options)
 
 
 @pytest.mark.parametrize(

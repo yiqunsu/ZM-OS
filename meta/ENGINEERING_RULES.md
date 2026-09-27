@@ -133,6 +133,7 @@
 ## 12. 部署可复现性
 
 AI 截图提取的 thinking、输出上限与超时必须显式配置并可对照，不得按模型名称猜测思考策略。
-正式发布使用干净提交和版本标签，并保存运行中服务的参数、依赖、源码与迁移证据。
-变更依赖需同步 `backend/requirements.lock` 或前端 lockfile，并重新构建、运行真实模型合成图片验收。
-具体命令见 [运维流程](../deploy/OPERATIONS.md)。
+正式发布推荐使用已提交的 main；固定 production 镜像标签通过 Docker 缓存重建，镜像内保留 Git revision，未提交改动标记 dirty 并警告，不自动删除用户改动。
+发布脚本必须保留配置校验、已有数据备份、迁移、服务健康与数据库结构检查，不强制生成报告或调用付费模型。
+变更依赖需同步 `backend/requirements.lock` 或前端 lockfile，并重新构建验证；模型功能的真实验收按改动范围单独进行。
+具体命令见 [生产部署](../deploy/production/README.md)。

@@ -147,7 +147,7 @@ Docker Compose 默认启用 Phoenix。发起一次 AI 对话后，可打开 http
 
 前后端核心业务、鉴权、可观测性、CI/CD、AI Agent 均已完成。演示数据脚本仅用于本地测试，不进生产。
 
-## 部署一致性检查
+## 发布操作
 
-本地 Casdoor 启动、AI 参数对照、版本报告与真实识别验收见 [运维流程](deploy/OPERATIONS.md)。
-生产发布会记录运行证据并执行一次合成图片模型验收；容器健康不代表浏览器业务验收完成。
+本地 Casdoor 启动见 [本地登录环境](deploy/local-auth/README.md)，模型配置和单脚本发布见 [生产部署](deploy/production/README.md)。
+生产发布保留备份、迁移和健康检查，不自动调用付费模型或生成报告；部署后在浏览器检查登录与 AI 功能。

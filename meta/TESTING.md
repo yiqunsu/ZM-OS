@@ -229,5 +229,6 @@ deploy/production/tests/smoke-backup-restore.sh
 生产撤回回归：后端覆盖整组关联/机器/位置保留、占用释放、重开工校验、过期状态/版本/关联集合拒绝和DONE不能直退WAITING；界面覆盖看板撤回确认取消/失败/刷新，以及订单管理桌面/手机整组同步。隔离全栈验证看板撤回后订单显示待生产并可重新开工。
 
 部署一致性：`tests/test_model_transport.py` 覆盖显式 thinking、新旧模型别名和生成上限；
-`tests/test_deployment_tools.py` 覆盖参数拒绝、漂移比较与识别验收字段。
-实际付费模型只读验收、运行报告及本次上线清单见 [运维流程](../deploy/OPERATIONS.md)。
+该文件同时覆盖无效模型参数拒绝。生产部署不再自动调用付费模型或比较运行报告。
+`deploy/production/tests/test_deploy.py` 使用隔离的假命令验证发布顺序、已有镜像仍重新检查构建、未提交改动标记和失败时停止，不连接业务数据库或真实模型。
+日常操作见 [生产部署](../deploy/production/README.md)；涉及模型行为的改动仍需单独验证实际图片功能，不能以容器健康替代。

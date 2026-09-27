@@ -18,8 +18,8 @@
 
 先推送经过验证的 development 提交，再在服务器检出这个提交。不要覆盖服务器未提交配置。
 记录 `git rev-parse HEAD`，通过现有 `scripts/deploy.sh` 构建部署。
-部署脚本要求干净的已提交工作区，使用 Git SHA 镜像标签，并保存发布证据。
-参数对照与真实图片验收见 [运维流程](../OPERATIONS.md)。
+部署脚本使用固定 `production` 标签和 Docker 构建缓存；未提交改动只警告并标记版本，不生成发布报告，不调用付费模型。
+当前发布步骤和模型配置见 [生产部署](README.md)。
 本地 development 修改不会自动同步到 GitHub 或服务器。
 
 ## 员工验收
