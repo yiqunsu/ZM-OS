@@ -55,3 +55,5 @@ NNNN-short-kebab-case-title.md
 | [0008](0008-store-chat-attachments-on-private-volume.md) | 聊天附件使用后端私有持久卷 | Accepted |
 | [0009](0009-langgraph-scheduling-workspace.md) | 受限 LangGraph 排单助手与草案看板 | Superseded by 0010 |
 | [0010](0010-specialized-agent-sessions-and-durable-runs.md) | 专用Agent会话与持久Run执行架构 | Accepted |
+
+[0011 development 与语义化版本发布](0011-development-and-semantic-releases.md)：Accepted。

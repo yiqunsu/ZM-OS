@@ -3,13 +3,12 @@ name: agent-integration
 on:
   push:
     branches: [main, development]
-    paths: ["backend/**", "frontend/**", ".github/workflows/agent-ci.yml"]
   pull_request:
     branches: [main, development]
-    paths: ["backend/**", "frontend/**", ".github/workflows/agent-ci.yml"]
 
 jobs:
   integration:
+    name: agent-integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

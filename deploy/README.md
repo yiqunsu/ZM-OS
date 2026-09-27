@@ -96,3 +96,5 @@ docker compose --env-file deploy/local/.env \
 不加 `-v`，保留数据库卷。生成的 Casdoor 配置位于 `.data/local-casdoor/`，被 Git 忽略；不要为了切换登录模式删除该目录或数据库卷。
 
 本地 Compose 项目名固定为 `zm-os`，保留原有 `zm-os_pgdata` 和 `zm-os_chat_attachments` 卷；文件移动不创建另一套本地数据。显式设置 `COMPOSE_PROJECT_NAME` 或 `-p` 仍可覆盖项目名，用于独立环境。
+
+正式发布采用版本标签 checkout，具体步骤见 [版本发布规则](../meta/RELEASING.md)。服务器在 detached HEAD 下升级应 fetch 后 checkout 新标签，不执行普通 git pull。

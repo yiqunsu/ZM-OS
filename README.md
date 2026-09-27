@@ -109,3 +109,7 @@ docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml -
 | `.github/workflows/` | 后端、前端、Agent 联调与部署配置检查 |
 
 生产部署使用独立配置和发布脚本，包含备份、迁移和健康检查，不自动调用付费模型。正式运行前还需人工验证登录、真实截图识别与业务操作。历史设计与验收记录见 [实施进度](meta/agent-design/implementation-status.md)，不以历史记录替代当前代码和运行验证。
+
+## 版本与发布
+
+日常开发在 `development`，稳定更新经 PR 合入 `main`；正式版本使用 `vMAJOR.MINOR.PATCH` 标签。开发、发布与部署步骤见 [版本发布规则](meta/RELEASING.md)。

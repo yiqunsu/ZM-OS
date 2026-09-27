@@ -1,0 +1,49 @@
+name: publish-release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(python scripts/release/version.py check)
+          tag="v${version}"
+          revision=$(git rev-parse HEAD)
+          if git show-ref --verify --quiet "refs/tags/${tag}"; then
+            test "$(git rev-parse "${tag}^{commit}")" = "$revision"
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a "$tag" -m "FilmOS $tag" "$revision"
+            git push origin "$tag"
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --title "FilmOS $tag" --generate-notes
+          fi
+      - name: Sync released history back to development
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin development
+          git checkout -B development origin/development
+          git merge --no-edit "$GITHUB_SHA"
+          git push origin HEAD:development

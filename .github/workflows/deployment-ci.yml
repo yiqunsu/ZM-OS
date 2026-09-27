@@ -3,31 +3,12 @@ name: deployment-ci
 on:
   push:
     branches: [main, development]
-    paths:
-      - "deploy/**"
-      - "backend/Dockerfile"
-      - "backend/.dockerignore"
-      - "backend/requirements*.txt"
-      - "backend/requirements.lock"
-      - "frontend/Dockerfile"
-      - "frontend/.dockerignore"
-      - "frontend/package*.json"
-      - ".github/workflows/deployment-ci.yml"
   pull_request:
     branches: [main, development]
-    paths:
-      - "deploy/**"
-      - "backend/Dockerfile"
-      - "backend/.dockerignore"
-      - "backend/requirements*.txt"
-      - "backend/requirements.lock"
-      - "frontend/Dockerfile"
-      - "frontend/.dockerignore"
-      - "frontend/package*.json"
-      - ".github/workflows/deployment-ci.yml"
 
 jobs:
   deployment:
+    name: deployment-checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
