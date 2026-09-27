@@ -137,6 +137,5 @@ worker 启动时独立初始化结构化日志与可选 Phoenix。新版 Trace �
 
 视觉传输与Schema错误通过既有 `run.progress` 的 RECOGNITION_ERROR 阶段记录安全错误码与重试序号；终止时工作项 last_error_code 与 recognition.failed 保存原因。客户/产品选择通过 MATCHING 阶段和 context_snapshot.entity_matching 保存每单、每字段的接受/拒绝码。错误码协议见 [Agent contracts](agent-design/contracts.md)。禁止把图片字节、完整模型响应、上游HTTP响应正文或凭证放入诊断事件/异常；仅在受权限保护的业务提取记录保留核对所需原文与建议依据。
 
-部署证据使用 `deploy/check.py` 与 `backend/scripts/deployment_report.py` 白名单输出，
-包含镜像版本、AI 行为参数、源码/依赖摘要和迁移版本，不输出凭证或业务数据。
-`/health` 的 revision 来自构建镜像。真实识别验收和版本对照见 [运维流程](../deploy/OPERATIONS.md)。
+`/health` 的 revision 来自构建镜像；部署完成时输出相同的版本标记。发布不生成自动对照报告，不调用真实模型。
+排查时按需查看容器健康和经过脱敏的运行日志，不输出环境全量、凭证或业务数据。操作见 [生产部署](../deploy/production/README.md)。

@@ -2,12 +2,7 @@ FROM python:3.12.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
-
-ARG APP_REVISION=unknown
-ENV APP_REVISION=${APP_REVISION}
-LABEL org.opencontainers.image.revision=${APP_REVISION}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -15,9 +10,13 @@ RUN groupadd --system filmos \
     && useradd --system --gid filmos --home-dir /app filmos
 
 COPY requirements.txt requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --timeout 60 --retries 5 -r requirements.txt -c requirements.lock
 
 COPY --chown=filmos:filmos . .
+ARG APP_REVISION=unknown
+ENV APP_REVISION=${APP_REVISION}
+LABEL org.opencontainers.image.revision=${APP_REVISION}
 RUN mkdir -p /app/data/chat-attachments \
     && chown -R filmos:filmos /app/data
 

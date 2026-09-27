@@ -40,7 +40,7 @@ services:
       dockerfile: ../deploy/production/backend.Dockerfile
       args:
         APP_REVISION: ${APP_REVISION:-unknown}
-    image: filmos-backend:${FILMOS_IMAGE_TAG:-production}
+    image: filmos-backend:production
     restart: unless-stopped
     init: true
     environment: &backend-environment
@@ -92,7 +92,7 @@ services:
     logging: *default-logging
 
   agent-worker:
-    image: filmos-backend:${FILMOS_IMAGE_TAG:-production}
+    image: filmos-backend:production
     command: [python, -m, app.agent.worker]
     restart: unless-stopped
     init: true
@@ -154,7 +154,7 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
         NEXT_PUBLIC_CASDOOR_URL: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
         NEXT_PUBLIC_CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}
-    image: filmos-frontend:${FILMOS_IMAGE_TAG:-production}
+    image: filmos-frontend:production
     restart: unless-stopped
     init: true
     environment:
