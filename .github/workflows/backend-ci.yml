@@ -3,10 +3,8 @@ name: backend-ci
 on:
   push:
     branches: [main, development]
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
     branches: [main, development]
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
 
 defaults:
   run:
@@ -14,6 +12,7 @@ defaults:
 
 jobs:
   test:
+    name: backend-tests
     runs-on: ubuntu-latest
 
     services:

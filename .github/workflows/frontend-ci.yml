@@ -3,10 +3,8 @@ name: frontend-ci
 on:
   push:
     branches: [main, development]
-    paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
   pull_request:
     branches: [main, development]
-    paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
 
 defaults:
   run:
@@ -14,6 +12,7 @@ defaults:
 
 jobs:
   build:
+    name: frontend-build
     runs-on: ubuntu-latest
 
     steps:

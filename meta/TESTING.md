@@ -267,3 +267,7 @@ API、Worker 和前端健康。历史卷不得为通过测试而删除。
 本地/生产配置对照由 `test_local_deploy.py` 验证：本地 Casdoor 与生产共用应用源码、登录镜像、Worker 命令和默认模型参数，API/Worker 配置与附件卷一致。完整登录与反向代理联调仍需单独验收。
 
 归档删除回归：`test_screenshot_library.py` 验证仅归档可删、版本保护、幂等、失败回滚、GC 登记与正式订单独立删除；浏览器验证确认取消、后端拒绝、网络失败重试和归档列表更新。迁移 008 验证空库/历史库升级和结构无漂移。
+
+## 版本发布验证
+
+版本脚本执行 `python3 -m unittest discover -s scripts/release -p "test_*.py"` 和 `python3 scripts/release/version.py check`。发布 PR 必须通过全部必需 CI，标签、版本与来源由 release-policy 校验。完整规则见 [RELEASING.md](RELEASING.md)。

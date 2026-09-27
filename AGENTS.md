@@ -54,3 +54,7 @@ docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml c
 ```
 
 详细测试矩阵以 `meta/TESTING.md` 为准。
+
+## 分支与发布
+
+日常开发使用 development；main 仅通过发布 PR 合并。版本准备、标签和发布规则必须遵守 [meta/RELEASING.md](meta/RELEASING.md)。禁止在日常提交中自动升版或移动已发布标签。

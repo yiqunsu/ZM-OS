@@ -2,7 +2,7 @@
 
 部署目录和环境选择见[部署总入口](../README.md)。
 
-> 日常发布只需拉取代码并运行 `./deploy/production/scripts/deploy.sh`，见第 6 节。
+> 正式发布先按 [版本发布规则](../../meta/RELEASING.md)检出目标版本标签，再运行 `./deploy/production/scripts/deploy.sh`。第 6 节的分支拉取方式仅用于旧流程。
 
 本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、AI Worker、Casdoor 和 PostgreSQL 组成；后端与 Worker 共用镜像。本地与生产统一使用 `backend/Dockerfile` 和 `frontend/Dockerfile`；本 Compose 选择后端 `production` target，并显式传入前端 Casdoor 模式及 API 地址。Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 

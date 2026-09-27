@@ -45,3 +45,5 @@ AI助手重构的开发设计总入口是 [PRD.md](PRD.md)，配套逻辑架构�
 - ADR 被新决策取代时保留原文件，并标记为 `Superseded`。
 - 能由类型、lint、测试或数据库约束执行的规则，不应只停留在 Markdown。
 - 避免在多份文档复制同一段规则；本文件只负责导航。
+
+分支、语义化版本、GitHub Release 与服务器按标签部署的操作规范见 [RELEASING.md](RELEASING.md)。
