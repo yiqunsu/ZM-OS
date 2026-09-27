@@ -1,0 +1,107 @@
+name: zm-os
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: filmos
+      POSTGRES_PASSWORD: filmos
+      POSTGRES_DB: filmos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filmos -d filmos"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  backend:
+    image: filmos-backend:local
+    build:
+      context: ../../backend
+      target: local
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
+    ports:
+      - "8000:8000"
+    environment: &backend-environment
+      AUTH_PROVIDER: local
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in deploy/local/.env}
+      ENVIRONMENT: development
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-deepseek-flash}
+      LLM_VISION_THINKING: ${LLM_VISION_THINKING:-disabled}
+      LLM_VISION_MAX_TOKENS: ${LLM_VISION_MAX_TOKENS:-8192}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
+      DATABASE_URL: postgresql+asyncpg://filmos:filmos@postgres:5432/filmos
+      CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
+      PHOENIX_ENABLED: "false"
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    networks:
+      - default
+
+  agent-worker:
+    image: filmos-backend:local
+    command: [python, -m, app.agent.worker]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 190s
+    healthcheck:
+      test: [CMD, python, -m, app.agent.worker, --healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment: *backend-environment
+    volumes:
+      - chat_attachments:/app/data/chat-attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../../frontend
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+    ports:
+      - "3000:3000"
+    environment:
+      AUTH_PROVIDER: local
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in deploy/local/.env}
+      AUTH_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  pgdata:
+  chat_attachments:

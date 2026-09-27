@@ -1,3 +1,5 @@
+import type { EventKind } from "./contracts.generated";
+
 export type AgentType = "ORDER_INTAKE" | "SCHEDULING";
 export interface Session {
   state?: { scheduling_order_ids?: string[] };
@@ -87,7 +89,7 @@ export interface Snapshot {
 }
 export interface Event {
   seq: number;
-  kind: string;
+  kind: EventKind;
   run_id: string | null;
   payload: { text?: string; stage?: string; tool_name?: string };
 }

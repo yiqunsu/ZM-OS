@@ -1,153 +1,111 @@
 # FilmOS (ZM-OS)
 
-> **development 分支**：AI助手重构设计已确认，开发依据见 [PRD](meta/PRD.md) 与 [ADR 0010](meta/decisions/0010-specialized-agent-sessions-and-durable-runs.md)。
-> 下文介绍当前实现，不代表目标架构已落地；运行与发布说明见 [开发部署说明](deploy/production/DEVELOPMENT.md)。
+面向塑料薄膜工厂的订单与生产协同系统：维护基础数据、录入订单、看板排产、跟踪生产任务，并通过 AI 截图识别和排单草案辅助操作。
 
-塑料薄膜工厂的订单管理系统：把「微信收单 → 手工录 Excel → 白板排产」的流程，替换成一套带 AI 助手的 Web 系统——对话式录单、看板式排产、生产任务跟踪。
+## 当前架构
 
-这是原 Next.js 全栈单体应用的重写版，转向 **Python 主导、前后端分离** 的架构，目标是贴近专业 SaaS 团队的工程实践（分层、鉴权、测试、CI/CD、可观测性、AI Agent）。
+当前 `main` 使用前后端分离与独立 Agent Worker。API 和 Worker 共用后端代码；PostgreSQL 同时保存业务数据和持久任务队列，无需 Redis 或 OpenClaw。
 
----
-
-## 整体架构
-
-前后端分离，单仓库（monorepo）管理多个独立容器：
-
-``` mermaid
+```mermaid
 flowchart LR
-    subgraph FE["前端 frontend (Next.js)"]
-        UI["浏览器 UI<br/>看板/订单/对话"]
-        NA["Auth.js<br/>OIDC 会话 + Token 刷新"]
-    end
-    subgraph BE["后端 backend (FastAPI) — 唯一业务入口"]
-        MW["JWT 中间件"]
-        R["Router 层"]
-        S["Service 层"]
-        AR["Agent runtime adapter"]
-    end
-    CD["Casdoor<br/>OIDC + 用户角色"]
-    PG[("PostgreSQL<br/>业务/聊天历史/审计")]
-    QW["千问<br/>OpenAI-compatible API"]
-    LG["LangGraph<br/>受限排单循环"]
-    PX["Phoenix<br/>可选 Trace UI"]
-
-    UI -->|"REST + Bearer JWT"| MW
-    UI -->|"SSE 流式对话"| MW
-    UI -->|OIDC 跳转| CD
-    CD -->|RS256 access token| NA --> UI
-    MW --> R --> S --> PG
-    R --> AR --> LG --> QW
-    LG -->|受限能力接口| S
-    LG -.->|"OpenInference / OTLP"| PX
+    UI[浏览器] --> FE[Next.js 前端与登录会话]
+    UI --> API[FastAPI 业务 API]
+    FE --> API
+    FE --> AUTH[Casdoor：可选本地登录 / 生产登录]
+    API --> DB[(PostgreSQL：业务、草稿、任务、事件)]
+    WORKER[Agent Worker：录单与排单 Graph] --> DB
+    WORKER --> MODEL[外部模型 API]
+    WORKER -. 可选 Trace .-> PHOENIX[Phoenix]
 ```
 
-关键点：
+- **前端**：订单、看板、截图录单和排单工作台；普通业务 API 使用 Bearer Token，Agent 请求通过 Next.js 同源代理。
+- **FastAPI**：认证与授权、业务校验、任务入队、查询进度，以及用户确认后的正式建单和排产。
+- **Agent Worker**：从 PostgreSQL 领取任务，运行录单/排单的 LangGraph 流程、调用模型并保存草稿与事件。浏览器断开不取消已入队任务。
+- **PostgreSQL**：业务事实源；图片正文另存共享附件卷，API 和 Worker 均可访问。
+- **人工确认**：AI 只准备草稿；正式业务写入由用户确认后通过后端 Service 原子执行。
 
-- **前端只做 UI**：不直连数据库，所有数据都经 FastAPI。这是把「前后端分离」落到实处的架构，也是大厂最常见的分工。
-- **后端是唯一业务入口**：REST API + Agent 适配层，统一完成鉴权、用户会话隔离、PostgreSQL 历史持久化和 SSE 流式返回。
-- **Casdoor 负责生产登录**：Auth.js 完成 OIDC code flow 和 Token 刷新，FastAPI 通过 JWKS 验证短期 RS256 access token，并把身份映射到稳定的本地用户 ID。
-- **FastAPI 负责授权**：`OWNER` 与 `OPERATOR` 都可管理订单、生产任务和自己的 Agent 会话；只有 `OWNER` 可修改基础数据。
-- **Agent** 在 FastAPI 进程内运行：录单由受控提取服务生成表单，排单由 LangGraph 调用只读与草案工具；业务写入必须明确确认。
-- **PostgreSQL** 存业务数据、聊天历史和审计日志；Redis 目前不是核心依赖，只在本地 Compose 保留。
-- **Phoenix** 通过 OpenInference/OpenTelemetry 接收 Agent Trace，用于查看模型、图节点和工具调用；它是可关闭的观测旁路，不参与业务事务。
+服务数量（单副本）：
 
----
+| 模式 | 常驻容器 | 一次性步骤 |
+| --- | --- | --- |
+| 默认本地 | 4：frontend、backend、postgres、agent-worker | 数据库迁移 |
+| 本地 Casdoor | 5：默认四个 + casdoor | Casdoor 数据库/配置初始化、业务迁移 |
+| 本地启用 Phoenix | 在所选模式上增加 1 个 phoenix | 无额外业务初始化 |
+| 生产，启用 AI | 6：frontend、backend、postgres、agent-worker、casdoor、caddy | 登录初始化、备份、迁移 |
 
-
-
-## 仓库结构
-
-```
-.
-├── frontend/            # Next.js 前端（UI 层）——详见 frontend/README.md
-├── backend/             # FastAPI 后端（业务 + AI Agent）——详见 backend/README.md
-├── deploy/production/   # 腾讯云单机 Compose、发布与备份脚本
-├── docker-compose.yml   # 本地/staging 编排：frontend + backend + postgres + redis + phoenix
-├── meta/                # Ground Truth、工程规范、测试要求和架构决策
-└── .github/workflows/   # CI：backend-ci（lint+test+build）、frontend-ci（lint+typecheck+build）
-```
-
-细节文档下沉到各自子目录，避免根文档随实现频繁变动：
-
-- 前端细节 → [frontend/README.md](frontend/README.md)
-- 后端细节 → [backend/README.md](backend/README.md)
-- 项目规范 → [meta/README.md](meta/README.md)
-
----
-
-
-
-## 技术栈
-
-
-| 层        | 技术                                                              |
-| -------- | --------------------------------------------------------------- |
-| 前端       | Next.js (App Router) · React · TypeScript · Tailwind · Auth.js |
-| 后端       | FastAPI · SQLAlchemy 2.0 (async) · Alembic · Pydantic           |
-| AI Agent | LangGraph· OpenAI-compatible API（默认千问）        |
-| Agent 可观测性 | OpenInference · OpenTelemetry · Arize Phoenix |
-| 身份       | Casdoor · OIDC · RS256/JWKS                                    |
-| 数据库      | PostgreSQL · Redis（仅本地可选）                                  |
-| 部署       | Docker Compose                                                  |
-| CI       | GitHub Actions                                                  |
-
-
----
-
-
+Casdoor 与 FilmOS 共用一个 PostgreSQL 容器，但使用独立数据库和账号。生产配置不包含 Redis 和 Phoenix。Caddy 提供统一入口与 HTTPS。
 
 ## 本地运行
 
-前置：Docker（守护进程需运行）。
+部署目录、环境配置位置与本地/生产入口统一见[部署说明](deploy/README.md)。
+
+需要 Git、运行中的 Docker 和 Docker Compose v2。容器部署不要求宿主机安装 Python、Node.js 或数据库。
+
+首次准备配置（已有文件时保留并检查，不覆盖）：
 
 ```bash
-# 1. 启动全部服务（首次或改了代码用 --build）
-docker compose up -d --build
-
-# 2. 建表（首次或有新迁移时）
-docker compose exec backend alembic upgrade head
-
-# 3. 创建本地开发账号（生产环境改用 Casdoor）
-docker compose exec backend python scripts/seed_admin.py owner@filmos.local filmos123
-
-# 4.（可选）灌入演示数据，方便测试看板/排产/Agent
-docker compose exec backend python scripts/seed_demo.py
+cp deploy/local/.env.example deploy/local/.env
 ```
 
-打开 [http://localhost:3000，用上面的账号登录。](http://localhost:3000，用上面的账号登录。)
+在该文件中填写随机 `AUTH_SECRET`；可用 `openssl rand -hex 32` 生成，只保存在本地配置中。AI 功能需在 `deploy/local/.env` 填写 `LLM_API_KEY`，并核对模型地址和文本/视觉模型名称。没有模型凭证仍可使用普通业务页面。
 
-各服务端口：前端 `3000`、后端 `8000`（API 文档 `/docs`）、Phoenix `6006`（Trace UI）、Postgres `5432`、Redis `6379`。
+启动或更新：
 
-Docker Compose 默认启用 Phoenix。发起一次 AI 对话后，可打开 http://localhost:6006，在 `filmos-agent` 项目中查看 Trace。Phoenix 不可用时不会影响普通业务 API。
+```bash
+./deploy/local/up.sh
+```
 
-### 需要自己配置的凭证
+脚本先校验配置和构建镜像，等待 PostgreSQL 就绪，停止已有应用写入进程，执行 Alembic 迁移，再启动 API、Worker 和前端并检查健康与数据库结构。构建失败不会停止原应用；迁移失败会保持应用停止，不删除数据卷或自动回滚。脚本不会创建账号或灌入演示数据。本地数据有保留价值时，升级前自行备份；生产必须使用生产发布脚本。
 
-以下能力代码已接好，但需要你提供凭证才生效（不提供也不影响其余功能）：
+首次使用本地账号模式时，另行创建开发账号：
 
-- **AI Agent 对话**：在 `backend/.env` 配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`；图片识别使用 `LLM_VISION_MODEL`。
-- **错误追踪（可选）**：设 `SENTRY_DSN` 启用 Sentry
+```bash
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend python scripts/seed_admin.py <email> <password>
+# 可选，仅用于本地体验：
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend python scripts/seed_demo.py
+```
 
-### Phoenix 安全说明
+打开 [http://localhost:3000](http://localhost:3000)。后端 API 文档位于 [http://localhost:8000/docs](http://localhost:8000/docs)，数据库端口为 `5432`。
 
-当前 Compose 配置面向本地或受信任内网，Phoenix UI 未开启认证。生产环境必须启用认证和访问控制、设置 Trace 保留期并固定 Phoenix 镜像版本；Prompt、回复和工具参数都可能进入 Trace。
+首次启动或代码包含数据库迁移时使用上面的脚本，不直接使用 `docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml up` 跳过迁移。默认 Compose 仅用于本机/受信网络，不部署到公网。停止时执行 `docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml down`；不加 `-v`，保留数据库和附件卷。
 
----
+### 可选 Casdoor 登录
 
-## 生产部署
+按 [本地登录说明](deploy/README.md#本地-casdoor-登录) 填好环境文件，然后执行：
 
-根目录 `docker-compose.yml` 仅用于本地开发，不应直接部署到公网。腾讯云轻量服务器使用独立生产栈，包含 PostgreSQL、Casdoor、FastAPI、Next.js与 Caddy。Casdoor 使用独立数据库和数据库账号；初期不包含 Redis、Phoenix、Sentry 或 COS。ICP备案通过前只允许 SSH 隧道访问。
+```bash
+./deploy/local/up.sh --casdoor
+```
 
-完整安装、更新、备份、恢复、回滚和备案后启用 HTTPS 的步骤见 [deploy/production/README.md](deploy/production/README.md)。
+这是同一个本地启动脚本的登录选项，额外初始化 Casdoor。无需通过 `seed_admin.py` 创建 Casdoor 账号。
 
----
+### 可选 AI 追踪
 
+```bash
+./deploy/local/up.sh --phoenix
+# Casdoor 模式：
+./deploy/local/up.sh --casdoor --phoenix
+```
 
+该选项合并 `compose.phoenix.yml`，在 Worker 启用追踪并启动 Phoenix；API 不依赖采集器。界面仅监听 [http://localhost:6006](http://localhost:6006)，Worker 隐藏模型输入、输出和图片。详见 [可观测性说明](meta/OBSERVABILITY.md)。
 
-## 状态
+关闭追踪时，以原登录模式重新运行脚本但不带 `--phoenix`，再停止采集器（保留追踪卷）：
 
-前后端核心业务、鉴权、可观测性、CI/CD、AI Agent 均已完成。演示数据脚本仅用于本地测试，不进生产。
+```bash
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml -f deploy/local/compose.phoenix.yml stop phoenix
+```
 
-## 发布操作
+## 代码与部署入口
 
-本地 Casdoor 启动见 [本地登录环境](deploy/local-auth/README.md)，模型配置和单脚本发布见 [生产部署](deploy/production/README.md)。
-生产发布保留备份、迁移和健康检查，不自动调用付费模型或生成报告；部署后在浏览器检查登录与 AI 功能。
+| 目录 | 职责 |
+| --- | --- |
+| `frontend/` | Next.js 页面、登录、Agent 同源代理；见 [前端说明](frontend/README.md) |
+| `backend/` | FastAPI、业务 Service、SQLAlchemy、Worker；见 [后端说明](backend/README.md) |
+| `backend/alembic/` | 数据库结构迁移 |
+| `deploy/` | 部署总入口、脚本与配置；见 [部署说明](deploy/README.md) |
+| `deploy/local/` | 本地启动与可选登录配置 |
+| `deploy/production/` | 生产 Compose、发布、备份、恢复；见 [生产部署](deploy/production/README.md) |
+| `meta/` | 业务事实、工程规则与架构决策；见 [文档地图](meta/README.md) |
+| `.github/workflows/` | 后端、前端、Agent 联调与部署配置检查 |
+
+生产部署使用独立配置和发布脚本，包含备份、迁移和健康检查，不自动调用付费模型。正式运行前还需人工验证登录、真实截图识别与业务操作。历史设计与验收记录见 [实施进度](meta/agent-design/implementation-status.md)，不以历史记录替代当前代码和运行验证。

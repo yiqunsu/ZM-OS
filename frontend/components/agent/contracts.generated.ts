@@ -1,0 +1,40 @@
+// Generated from backend/app/models/agent.py; do not edit.
+// Regenerate: python3 backend/scripts/export_agent_contract.py
+
+export const EVENT_KINDS = [
+  "session.created",
+  "session.archived",
+  "session.restored",
+  "session.deleting",
+  "session.state_changed",
+  "message.accepted",
+  "message.completed",
+  "command.accepted",
+  "run.queued",
+  "run.started",
+  "run.progress",
+  "run.succeeded",
+  "run.failed",
+  "run.cancelled",
+  "admittance.decided",
+  "work_item.queued",
+  "work_item.activated",
+  "work_item.deferred",
+  "work_item.closed",
+  "work_item.created",
+  "recognition.completed",
+  "recognition.failed",
+  "draft.updated",
+  "plan.generated",
+  "plan.updated",
+  "plan.superseded",
+  "plan.closed",
+  "plan.applied",
+  "tool.started",
+  "tool.succeeded",
+  "tool.failed",
+  "tool.abandoned",
+  "assistant.delta",
+] as const;
+
+export type EventKind = (typeof EVENT_KINDS)[number];

@@ -29,9 +29,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements.txt
+            backend/requirements.lock
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -40,12 +43,14 @@ jobs:
       - name: Install backend test runtime
         run: |
           python -m venv backend/venv
-          backend/venv/bin/pip install -r backend/requirements-dev.txt
+          backend/venv/bin/pip install -r backend/requirements-dev.txt -c backend/requirements.lock
       - name: Install frontend and browser
         working-directory: frontend
         run: |
           npm ci
           npx playwright install --with-deps chromium
+      - name: Check shared Agent event contract
+        run: python3 backend/scripts/export_agent_contract.py --check
       - name: Browser protocol regression
         working-directory: frontend
         run: npm run test:agent

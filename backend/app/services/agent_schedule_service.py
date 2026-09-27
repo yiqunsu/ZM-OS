@@ -17,8 +17,9 @@ from app.models import (
 )
 from app.models.base import generate_id
 from app.services import agent_session_service as sessions
-from app.services import schedule_service as scheduling
 from app.services.agent_event_service import append_event, canonical_hash
+from app.services.scheduling import inputs as scheduling_inputs
+from app.services.scheduling import service as scheduling
 from app.services.scheduling_lock import lock_scheduling_inputs
 
 
@@ -78,7 +79,7 @@ async def generate(db: AsyncSession, session: ChatSession, run: AgentRun) -> dic
         if replacement["plan_id"] != previous.id or replacement["expected_revision"] != previous.revision:
             sessions.fail("DRAFT_REVISION_CONFLICT", "原草案已更新，请重新确认替换")
     await lock_scheduling_inputs(db)
-    orders = await scheduling._load_orders(db)
+    orders = await scheduling_inputs.load_orders(db)
     if not orders:
         return {"outcome": "NO_PENDING", "pending_count": 0}
     plan = await scheduling.create_schedule_plan(

@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from app.schemas.agent.order_extraction import OrderExtraction
-from app.schemas.agent.order_intake import OrderDraft, RawOrderExtraction
+from app.schemas.agent.order_intake import OrderDraft
 
 
 def decimal_text(value: Decimal) -> str:
@@ -11,11 +11,7 @@ def decimal_text(value: Decimal) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
-def normalize_extraction(raw: OrderExtraction | RawOrderExtraction) -> tuple[dict, list[dict]]:
-    if isinstance(raw, RawOrderExtraction):
-        from app.services.legacy_order_extraction import normalize_legacy
-
-        return normalize_legacy(raw)
+def normalize_extraction(raw: OrderExtraction) -> tuple[dict, list[dict]]:
     draft = OrderDraft().model_dump()
     specs, originals, issues = {}, [], []
     for measurement, label, factors, target in (

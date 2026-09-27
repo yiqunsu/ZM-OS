@@ -144,6 +144,22 @@ export default function OrderWorkbench({
       await refreshAfterEdit();
     });
   }
+  async function deleteScreenshot(group: ScreenshotGroup) {
+    await act(async () => {
+      if (!(await saved())) return;
+      if (!(await confirm({
+        title: "删除这张归档截图？",
+        description: "将永久删除原图及其全部识别记录和草稿，无法恢复。已创建的正式订单会保留，订单管理不受影响。",
+        confirmLabel: "删除截图", destructive: true,
+      }))) return;
+      await agentApi.command(`/intake/screenshots/${group.id}`, {
+        expected_revision: group.revision ?? 0,
+      }, "DELETE");
+      setViewed(null);
+      setNotice("归档记录已删除，原图正在清理。已创建的正式订单保留。");
+      await refreshAfterEdit();
+    });
+  }
   async function openUpload() {
     if (!(await saved())) return;
     if (session.status === "ARCHIVED") {
@@ -241,6 +257,7 @@ export default function OrderWorkbench({
             tab={tab}
             onTab={(next) => void act(() => changeTab(next))}
             onArchive={(group) => void archiveScreenshot(group)}
+            onDelete={(group) => void deleteScreenshot(group)}
             selectedId={current?.id}
             runningId={run?.work_item_id}
             disabled={working || !!run}

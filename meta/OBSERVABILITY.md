@@ -18,7 +18,7 @@
 ## 2. Phoenix 数据流
 
 ```text
-LangChain / LangGraph
+Agent Worker：LangChain / LangGraph
         │ OpenInference 自动埋点
         ▼
 OpenTelemetry TracerProvider
@@ -42,15 +42,10 @@ Phoenix :6006
 | `PHOENIX_COLLECTOR_ENDPOINT` | `http://phoenix:6006` | Phoenix 服务根地址；代码追加 `/v1/traces` |
 | `PHOENIX_PROJECT_NAME` | `filmos-agent` | Phoenix 中的项目名称 |
 
-Docker Compose 当前会：
-
-- 启动 `arizephoenix/phoenix` 容器；
-- 在宿主机开放 `http://localhost:6006`；
-- 将后端的 `PHOENIX_ENABLED` 设置为 `true`；
-- 使用 `phoenixdata` 保存 Phoenix 自身数据；
-- 使用 `PHOENIX_WORKING_DIR=/mnt/data` 指向持久卷。
-
-直接在 Compose 外运行后端时，Phoenix 默认关闭，除非显式设置 `PHOENIX_ENABLED=true`。
+默认 Compose 不启动 Phoenix，API 和 Worker 的追踪均关闭。
+`./deploy/local/up.sh --phoenix`（Casdoor 模式用 `./deploy/local/up.sh --casdoor --phoenix`）
+合并 `compose.phoenix.yml`，仅在 Worker 启用追踪，启动采集器并监听 `127.0.0.1:6006`。
+Phoenix 使用独立 `phoenixdata` 卷；没有核心服务依赖采集器启动或健康。
 
 ## 4. 失败行为
 
@@ -65,7 +60,7 @@ Docker Compose 当前会：
 启动服务：
 
 ```bash
-docker compose up -d --build phoenix backend frontend
+./deploy/local/up.sh --phoenix
 ```
 
 打开 Phoenix UI：
@@ -80,13 +75,16 @@ http://localhost:6006
 filmos-agent
 ```
 
-检查后端初始化日志：
+检查 Worker 初始化日志：
 
 ```bash
-docker compose logs --tail=100 backend
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml logs --tail=100 agent-worker
 ```
 
 预期看到 `phoenix_enabled`；关闭时应看到 `phoenix_disabled`，初始化失败时会看到 `phoenix_init_failed`。
+
+关闭追踪：以原登录模式重新运行启动脚本但不带 `--phoenix`，然后执行
+`docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml -f deploy/local/compose.phoenix.yml stop phoenix`。该操作保留追踪数据卷。
 
 ## 6. 数据安全
 
@@ -97,6 +95,8 @@ OpenInference Trace 可能采集：
 - 工具名称、参数和结果；
 - Token 使用量、耗时和错误；
 - 会话相关元数据。
+
+当前 Worker 使用 `setup_phoenix(private=True)` 隐藏输入、输出和图片，只保留必要执行元信息；SDK 的默认采集能力不等于本项目启用的内容。
 
 因此：
 

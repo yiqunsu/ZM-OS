@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChatSession, OrderIntakeItem
 from app.models.base import generate_id
 from app.schemas.agent.order_extraction import OrderExtraction, ScreenshotExtraction
-from app.schemas.agent.order_intake import OrderDraft, RawOrderExtraction
+from app.schemas.agent.order_intake import OrderDraft
 from app.services import agent_session_service as sessions
 from app.services.agent_event_service import append_event
 from app.services.agent_projections import item_snapshot
@@ -20,7 +20,7 @@ async def save_extraction(
     db: AsyncSession,
     session: ChatSession,
     item: OrderIntakeItem,
-    raw: RawOrderExtraction | OrderExtraction,
+    raw: OrderExtraction,
     expected: int,
     run_id: str,
     suggestions: dict | None = None,

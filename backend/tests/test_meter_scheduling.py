@@ -7,9 +7,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.models import Machine, MachineCategory, Order, OrderIntakeItem, ProductionTask
-from app.services import schedule_service
 from app.services.agent_projections import item_snapshot
 from app.services.production_service import create_task
+from app.services.scheduling import service as schedule_service
 from tests.test_agent_v2 import enable_v2  # noqa: F401
 from tests.test_scheduling import _setup_schedulable
 from tests.test_scheduling_v2 import run_selected

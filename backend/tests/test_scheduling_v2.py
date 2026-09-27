@@ -186,7 +186,7 @@ async def test_unfeasible_and_stale_inputs_never_apply(client, db_session):
 
 @pytest.mark.asyncio
 async def test_failed_replacement_keeps_existing_draft(client, db_session, monkeypatch):
-    from app.services import schedule_service
+    from app.services.scheduling import service as schedule_service
 
     await _setup_schedulable(db_session)
     sid, run, _ = await run_graph(client, db_session)
@@ -326,7 +326,7 @@ async def run_selected(client, db, ids, *, model=None):
 
 @pytest.mark.asyncio
 async def test_selected_scope_edit_apply_and_unrelated_orders(client, db_session):
-    from app.services import schedule_service
+    from app.services.scheduling import service as schedule_service
 
     _, machine, orders = await _setup_schedulable(db_session)
     plan = await run_selected(client, db_session, [orders[0].id])

@@ -60,6 +60,11 @@ has_existing_schema="$(
     --command "SELECT to_regclass('public.alembic_version') IS NOT NULL;" \
     | tr -d '[:space:]'
 )"
+# Quiesce API and Worker before snapshotting attachments/data or changing schema.
+# A failed backup/migration deliberately leaves writers stopped for diagnosis.
+printf 'Stopping application writers before backup and migration...\n'
+compose stop frontend backend agent-worker
+
 if [[ "${has_existing_schema}" == "t" ]]; then
   "${SCRIPT_DIR}/backup.sh" predeploy
 else
@@ -67,7 +72,7 @@ else
 fi
 
 printf 'Applying Alembic migrations...\n'
-compose run --rm backend alembic upgrade head
+compose run --rm --no-deps backend alembic upgrade head
 
 printf 'Starting application services...\n'
 compose up -d --remove-orphans backend frontend caddy

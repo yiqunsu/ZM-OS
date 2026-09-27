@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LOCAL_AUTH_ENV = REPO_ROOT / "deploy/local-auth/.env.local-auth.example"
+LOCAL_AUTH_ENV = REPO_ROOT / "deploy/local/.env.example"
 PRODUCTION_ENV = REPO_ROOT / "deploy/production/.env.production.example"
 
 
@@ -70,7 +70,6 @@ class FrontendBuildConfigurationTests(unittest.TestCase):
     def test_dockerfiles_embed_api_base_during_next_build(self) -> None:
         cases = (
             (REPO_ROOT / "frontend/Dockerfile", "http://localhost:8000/api"),
-            (REPO_ROOT / "deploy/production/frontend.Dockerfile", "/api"),
         )
         for dockerfile, expected_default in cases:
             with self.subTest(dockerfile=dockerfile):
@@ -78,11 +77,11 @@ class FrontendBuildConfigurationTests(unittest.TestCase):
 
     def test_default_compose_renders_local_api_base_and_accepts_override(self) -> None:
         rendered = render_compose(
-            "docker-compose.yml",
+            "deploy/local/docker-compose.yml",
             env_file=LOCAL_AUTH_ENV,
         )
         custom = render_compose(
-            "docker-compose.yml",
+            "deploy/local/docker-compose.yml",
             env_file=LOCAL_AUTH_ENV,
             api_url="https://api.example.test/custom-api",
         )
@@ -102,8 +101,8 @@ class FrontendBuildConfigurationTests(unittest.TestCase):
 
     def test_local_auth_merge_preserves_prefixed_api_base(self) -> None:
         rendered = render_compose(
-            "docker-compose.yml",
-            "compose.local-auth.yml",
+            "deploy/local/docker-compose.yml",
+            "deploy/local/compose.local-auth.yml",
             env_file=LOCAL_AUTH_ENV,
         )
         build_args = rendered["services"]["frontend"]["build"]["args"]
@@ -124,6 +123,9 @@ class FrontendBuildConfigurationTests(unittest.TestCase):
             env_file=PRODUCTION_ENV,
             api_url="https://api.example.test/custom-api",
         )
+
+        self.assertEqual(rendered["services"]["frontend"]["build"]["args"]["NEXT_PUBLIC_AUTH_PROVIDER"], "casdoor")
+        self.assertEqual(rendered["services"]["backend"]["build"]["target"], "production")
 
         self.assertEqual(
             rendered["services"]["frontend"]["build"]["args"][

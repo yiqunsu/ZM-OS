@@ -19,7 +19,7 @@ from app.schemas.agent.order_intake import OrderDraft
 from app.services import agent_session_service as sessions
 from app.services.agent_event_service import append_event
 from app.services.order_intake_item_service import validate_draft
-from app.services.order_quantity_extraction import extracted_quantity
+from scripts.maintenance.extraction import extracted_quantity
 
 
 async def repair(db: AsyncSession, item_ids: list[str]) -> list[dict]:

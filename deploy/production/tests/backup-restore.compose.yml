@@ -24,7 +24,7 @@ services:
       CASDOOR_DB_USER: ${CASDOOR_DB_USER}
       CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD}
     volumes:
-      - ../../local-auth/init-database.sh:/init-database.sh:ro
+      - ../../local/casdoor/init-database.sh:/init-database.sh:ro
     command: ["bash", "/init-database.sh"]
     depends_on:
       postgres:

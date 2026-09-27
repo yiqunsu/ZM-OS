@@ -35,12 +35,15 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements.txt
+            backend/requirements.lock
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: pip install -r requirements-dev.txt -c requirements.lock
 
       - name: Lint (ruff)
         run: ruff check .
@@ -49,4 +52,4 @@ jobs:
         run: python -m pytest -q
 
       - name: Build Docker image
-        run: docker build -t filmos-backend:ci .
+        run: docker build --target local -t filmos-backend:ci .

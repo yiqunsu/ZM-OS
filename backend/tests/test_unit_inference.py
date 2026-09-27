@@ -8,9 +8,7 @@ from app.agent.specialized.order_capabilities import OrderCapabilities
 from app.agent.specialized.order_graph import build_order_graph
 from app.agent.worker import claim, finalize
 from app.models import OrderIntakeItem
-from app.schemas.agent.order_intake import RawOrderExtraction
-from app.services.legacy_order_extraction import inferred_specs
-from app.services.order_matching_service import extracted_draft
+from scripts.maintenance.extraction import RawOrderExtraction, inferred_specs, normalize_legacy
 from tests.support.extraction_fixture import extracted_order, screenshot
 from tests.test_agent_v2 import enable_v2  # noqa: F401
 from tests.test_order_intake_v2 import FakeModel, factory, setup_item
@@ -34,7 +32,7 @@ def evidence(**changes):
 
 async def test_inference_fills_standard_values_and_keeps_evidence(db_session):
     raw = evidence()
-    draft = await extracted_draft(db_session, raw)
+    draft, _ = normalize_legacy(raw)
     assert draft["spec_params"]["宽幅"] == "425mm"
     assert draft["spec_params"]["厚度"] == "118μm"
     assert raw.width_raw == "42.5" and raw.thickness_raw == "11.8"
@@ -52,12 +50,12 @@ async def test_explicit_units_are_never_overridden(db_session, width, thickness)
         assert specs["宽幅"] == width and not issues
     else:
         assert len(issues) == 1
-    draft = await extracted_draft(db_session, raw)
+    draft, _ = normalize_legacy(raw)
     assert draft["spec_params"]["厚度"] == thickness
 
 
 async def test_missing_inference_does_not_apply_a_default(db_session):
-    draft = await extracted_draft(db_session, evidence(inferred_spec_units=[]))
+    draft, _ = normalize_legacy(evidence(inferred_spec_units=[]))
     assert draft["spec_params"]["宽幅"] == "42.5"
     assert draft["spec_params"]["厚度"] == "11.8"
 

@@ -1,6 +1,6 @@
 # FilmOS Backend
 
-> 后续AI助手重构统一遵循 [PRD](../meta/PRD.md) 及配套设计。下文描述当前实现，不能替代目标设计。
+> 当前运行架构与本地启动入口见 [根 README](../README.md)；业务与设计约束见 [PRD](../meta/PRD.md)。
 
 ## 专用 Agent
 
@@ -38,7 +38,7 @@ flowchart TD
     SV --> M --> DB
 ```
 
-> `app/repositories/` 是预留的数据访问层目录，当前数据访问仍写在 Service 里；将来复杂度上来后可把查询下沉到 Repository。
+数据访问位于 Service 层；当前没有单独的 Repository 层。
 
 领域划分：`Order`（订单）、`Production`（排产/看板）、`MasterData`（客户/产品/配方/机器/品类）、`Auth`（Casdoor 身份映射与 RBAC）、`Agent`（AI 对话）。
 
@@ -59,7 +59,7 @@ app/
 ├── schemas/           # Pydantic 请求/响应模型
 ├── routers/           # API 路由（按领域拆分，全部 JWT 保护）
 ├── services/          # 业务逻辑 + 数据访问
-├── repositories/      # （预留）数据访问层
+│   └── scheduling/    # 排产：inputs 查询/指纹、planner 计算、service 用例/事务
 └── agent/             # 专用 Agent 执行
     ├── registry.py    #   图版本、可信上下文与权限
     ├── worker.py      #   Run 队列、租约、执行、终结
@@ -68,17 +68,27 @@ app/
 
 ---
 
+维护脚本位于 `scripts/maintenance/`，旧识别格式转换已移出 `app/`。实时识别仅处理 `OrderExtraction` v2；历史证据保留不变。定向数量修复在后端目录执行：
+
+```bash
+python -m scripts.maintenance.repair_intake_quantities --help
+```
+
+默认 dry-run；应用修复必须明确提供工作项 ID、`--apply` 和新备份文件。不得作为启动步骤自动执行。
+
+`Dockerfile` 共用依赖与代码层，`local` target 保留本地卷访问方式，`production` target 使用专用非 root 用户及代理配置；API 和 Worker 共用镜像。
+
 ## Agent 执行
 
 浏览器通过同源 `/api/agent/v2` 代理调用后端。消息、Run 和接收事件原子入库；独立 Worker 按会话串行执行，图只读取数据和编辑草稿。录单创建与排单执行均由用户按钮携带最新版本明确确认。
 
 ### Phoenix 可观测性
 
-`app/core/phoenix.py` 在后端启动时注册 LangChain 自动埋点，业务和 Agent 代码不直接依赖 Phoenix SDK。Docker Compose 默认启用并将 Trace 发送到 `http://phoenix:6006/v1/traces`，浏览器通过 http://localhost:6006 查看 `filmos-agent` 项目。
+`app/core/phoenix.py` 提供可选埋点。默认本地和生产配置均关闭追踪，不启动 Phoenix。
+本地使用 `./deploy/local/up.sh --phoenix`（从仓库根目录）时，独立 Worker 启用 LangChain/LangGraph 埋点，发送到 `http://phoenix:6006/v1/traces`；浏览器通过 http://localhost:6006 查看 `filmos-agent` 项目。
 
-Phoenix 是可关闭的观测旁路：未启用时不连接采集端，初始化失败只写 `phoenix_init_failed` 日志，不应阻止 API 启动。它不替代 structlog、Sentry、PostgreSQL 业务审计。
-
-Trace 可能包含 Prompt、模型回复和工具参数。当前 Compose 配置只适合本地或受信任内网；生产环境必须启用认证、API Key、TLS 和保留策略，并固定 Phoenix 镜像版本。
+Worker 隐藏输入、输出和图片；采集器不参与业务事务，也不是 API/Worker 的启动依赖。
+初始化失败只记录安全错误，不能阻止业务执行。生产启用追踪前的访问控制、保留策略与版本要求见 [可观测性说明](../meta/OBSERVABILITY.md)。
 
 ---
 
@@ -87,7 +97,7 @@ Trace 可能包含 Prompt、模型回复和工具参数。当前 Compose 配置�
 ```bash
 # 依赖（本地开发）
 python -m venv venv && source venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt -c requirements.lock
 
 # 迁移
 alembic upgrade head                      # 应用迁移
@@ -104,16 +114,17 @@ python scripts/seed_admin.py <email> <password>   # 创建/重置登录账号
 python scripts/seed_demo.py [--reset]             # 灌入演示数据（仅测试用）
 ```
 
-容器内跑同样命令加前缀 `docker compose exec backend ...`。
+容器内跑同样命令加前缀 `docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend ...`。
 
 ---
 
-## 环境变量（`backend/.env`）
+## 后端运行时变量
+
+本地配置来源是 `deploy/local/.env`；数据库地址、运行环境和登录模式由 Compose 配置，模型与日志参数从该文件读取。下表说明运行时变量，不代表每项都需要手动填写。
 
 | 变量 | 说明 |
 |---|---|
 | `DATABASE_URL` | Postgres 连接串（`postgresql+asyncpg://…`） |
-| `REDIS_URL` | Redis 连接串 |
 | `AUTH_PROVIDER` | `local` 或 `casdoor`；生产强制为 `casdoor` |
 | `AUTH_SECRET` | 仅本地开发 HS256 登录使用；生产业务 Token 不使用该密钥 |
 | `CASDOOR_ISSUER` | 外部 OIDC issuer，必须与 Token `iss` 完全一致 |
@@ -122,20 +133,20 @@ python scripts/seed_demo.py [--reset]             # 灌入演示数据（仅测�
 | `CASDOOR_ORGANIZATION` | 允许的 Casdoor 组织；生产固定为 `filmos` |
 | `LLM_API_KEY` | Agent 的模型 API Key（空则 Agent 报错但不影响其余接口） |
 | `LLM_BASE_URL` | OpenAI-compatible API 地址；默认千问国内 DashScope |
-| `LLM_MODEL` | 模型 ID；默认 `qwen3.7-plus` |
-| `LLM_VISION_MODEL` | JPG/PNG 订单识别模型；默认 `qwen3-vl-plus` |
+| `LLM_MODEL` | 模型 ID；默认 `deepseek-v4-flash` |
+| `LLM_VISION_MODEL` | JPG/PNG 订单识别模型；默认 `deepseek-flash` |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | 受控订单提取模型调用超时；默认 60 秒 |
 | `CHAT_ATTACHMENT_DIR` | 聊天图片附件目录；容器中固定为 `/app/data/chat-attachments` 并挂载私有持久卷 |
 | `SENTRY_DSN` | 可选，错误追踪 |
-| `PHOENIX_ENABLED` | 是否启用 Agent Trace；后端默认 `false`，Compose 当前设为 `true` |
+| `PHOENIX_ENABLED` | 是否启用 Agent Trace；默认 `false`，本地 Phoenix 扩展只为 Worker 开启 |
 | `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix 根地址，默认 `http://phoenix:6006` |
 | `PHOENIX_PROJECT_NAME` | Phoenix 项目名，默认 `filmos-agent` |
 
 
 
-### 专用 Agent（验收中）
+### 专用 Agent 验证
 
-新版提供录单和排单两个独立 Graph，使用 PostgreSQL 持久 Run 队列和独立 worker。HTTP 接受消息返回 202，SSE 只读取持久事件；业务确认仍由用户操作接口执行。默认 `AGENT_V2_ENABLED=true`，旧运行时已移除，实际状态与启用步骤见 [实施进度](../meta/agent-design/implementation-status.md)。
+默认 `AGENT_V2_ENABLED=true`；该开关用于维护停用，关闭不会恢复旧运行时。历史实施与验收记录见 [实施进度](../meta/agent-design/implementation-status.md)。
 
 ```bash
 venv/bin/python -m pytest tests/test_agent_v2.py tests/test_order_intake_v2.py tests/test_scheduling_v2.py tests/test_agent_migrations.py -q
@@ -143,6 +154,8 @@ venv/bin/python -m pytest tests/test_agent_v2.py tests/test_order_intake_v2.py t
 venv/bin/python -m app.agent.worker
 ```
 
-迁移测试创建并删除 `filmos_migration_test_*` 临时数据库，不升级实际业务库。应用回退须保留扩展 Schema，不要 downgrade 删除已接受的任务。真实模型评测、业务联调、生产切换尚未验收。
+迁移测试创建并删除 `filmos_migration_test_*` 临时数据库，不升级实际业务库。应用回退须保留扩展 Schema，不要 downgrade 删除已接受的任务。测试结果不能替代当前部署的登录、真实模型和业务样本验收。
 
 截图上传的固定上限为 5MiB / 2000 万像素，由 `agent_attachment_service.py` 校验；旧 AGENT_IMAGE_MAX_BYTES 设置已移除。
+
+Docker 本地部署统一读取仓库根目录下的 `deploy/local/.env`，生产读取 `deploy/production/.env.production`。直接在宿主机运行开发进程时，需要将对应配置显式注入进程；框架不会自动读取部署目录。后端数据库地址需使用宿主机地址，前端 `BACKEND_INTERNAL_URL` 也需指向宿主机后端。

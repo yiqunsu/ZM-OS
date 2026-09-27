@@ -183,7 +183,7 @@
 - 本地两笔原始提取为 `7500米不要多-包含损耗` / `10000米不要多-包含损耗`，直接 Decimal 转换失败，导致数量和单位同时丢失。新增截图数量规范化：明确单数量及单位独立保存，交付短语进入备注；原始 extraction 保留。提取提示词要求模型分开返回数值、单位和交付要求。
 - 支持有效千分位与 m/kg/g/t 及中文单位；范围、算式、多个候选、单位冲突和非法数值拒绝取首数，原始内容留在备注供核对。无数量时仍可保留明确单位，无单位的纯数字可显示但最终确认要求单位完整。
 - `venv/bin/ruff check .`、`git diff --check`、Compose 配置校验通过；后端 185 项与全栈 3 项通过，全栈同图两单覆盖带单位及交付短语的数量预填。测试仅有既有 NO_COLOR/FORCE_COLOR 提示。未改前端应用代码/数据库结构，未重复前端 lint/build。
-- `scripts/repair_intake_quantities.py` 默认 dry-run，显式指定工作项 ID；apply 必须在提交前写权限 0600 的新备份。锁 Session 并要求无开放 Run；只修复尚未创建且非 USER 来源的空数量，保留选择状态、其他草稿字段及人工备注，记录 revision 和 draft.updated 事件。可重复执行，不覆盖已填值。
+- `scripts/maintenance/repair_intake_quantities.py`（原 `scripts/repair_intake_quantities.py`） 默认 dry-run，显式指定工作项 ID；apply 必须在提交前写权限 0600 的新备份。锁 Session 并要求无开放 Run；只修复尚未创建且非 USER 来源的空数量，保留选择状态、其他草稿字段及人工备注，记录 revision 和 draft.updated 事件。可重复执行，不覆盖已填值。
 - 本地两份受影响草稿已原子补回 7500m / 10000m，保留“不要多-包含损耗”；仍为 DEFERRED / ACTIVE，均未创建正式订单。备份位于 `.data/backups/quantity-text-fix-20260913/before.json`。无需重新上传截图，刷新会话读取新 revision。
 - 本地 backend / agent-worker 已更新为 v2-2026-09-13-3；切换前开放 Run 为 0，旧镜像保留 before-quantity-fix-20260913-005043 标签。API、页面与 Worker 健康检查通过，前端镜像未变更。
 
@@ -338,3 +338,43 @@ AGENT_V2_ENABLED=true docker compose --profile agent-v2 up -d --build backend ag
 - 构建成功。npm 安装阶段报告 12 条依赖审计告警（3 moderate、8 high、1 critical），本次未进行无关依赖升级；需要另行核查生产依赖影响并处理。
 
 这是本地实测版本的部署记录，不等于 D5 真实样本评测或 D6 生产切换完成。不要通过 Alembic downgrade 丢弃已接受的新版消息或订单；需回退时先停止新版输入/领取，保留扩展结构与现有业务数据。
+
+## 仓库整理两轮更新（2026-09-27，本地工作区）
+
+- 本地默认四个服务：前端、API、Worker、PostgreSQL；移除 Redis，Phoenix 改为可选 overlay。统一启动入口负责配置校验、构建、迁移、健康和结构检查。
+- 排产归入 `backend/app/services/scheduling/`，分离查询与指纹、规划计算、事务用例；手工录单与 AI 共用表单归入 `frontend/components/orders/form/`。
+- 历史 v1 解析与定向数量修复归入 `backend/scripts/maintenance/`，实时应用只使用新版识别格式；未执行历史数据修复或删除历史数据。
+- 本地和生产共用 `backend/Dockerfile`、`frontend/Dockerfile`；生产后端使用专用 target，前端通过 Compose 明确传入登录模式和 API 地址。
+- `backend/scripts/export_agent_contract.py` 从后端生成前端 SSE 事件清单及事件类型，CI 检查漂移；业务 DTO 仍需同步维护。
+- 第二轮验证：后端 295 项、浏览器协议 36 项、部署测试 43 项通过；更新生产构建断言后另行复跑 4 项配置测试通过。Ruff、ESLint、TypeScript、Next build、四种镜像构建和容器健康检查通过。浏览器运行有颜色环境变量提示，无测试失败。
+- 后端测试使用隔离临时 PostgreSQL；测试容器已清理。未进行正式部署、真实模型或完整 OIDC 登录联调，未提交或推送本轮改动。
+
+目录组织遵循[工程规范](../ENGINEERING_RULES.md)，当前启动与维护入口以各 README 为准，旧[development 部署说明](../../deploy/production/DEVELOPMENT.md)仅保留作历史记录。
+
+### 冗余代码清理（2026-09-27）
+
+删除无运行时调用的旧回复卡片生成 Schema、旧排产响应 Schema、排产 `plan_payload` / `get_latest_draft` 辅助函数，以及前端五个未引用的 Next.js 模板 SVG。历史消息 `presentation` 数据及数据库字段继续保留；`tests/test_message_history.py` 使用固定历史 JSON 验证快照读取兼容性，不再依赖已退役的卡片生成器。数据库迁移和维护脚本未删除。
+
+本次删除后验证：后端完整测试 293 项通过（移除两项仅验证退役卡片生成器的测试，历史消息兼容测试保留）；Ruff、前端 ESLint 与生产构建通过，无失败或警告。隔离测试数据库容器已清理；未提交或推送。
+
+### 部署入口收敛与差异核对（2026-09-27）
+
+移除本地 Casdoor 启动包装脚本，统一使用 `deploy/local/up.sh` 的 `--casdoor` / `--phoenix` 选项。生产发布补上备份与迁移前停止 API、Worker 和前端，并用 `--no-deps` 执行迁移，失败保持停止。生产运维差异与数据库镜像标签差异记录在生产 README；没有执行实际部署或切换数据库镜像。
+
+### 部署默认配置（2026-09-27）
+
+生产默认启用六个核心服务，微信/Phoenix/Sentry 关闭，保留私有隧道访问。模型模板、后端默认值与生产 Compose 同步到现有本地 DeepSeek 配置，未验证供应商模型可用性。已生成被 Git 忽略、权限 0600 的生产 env，密码独立随机生成；真实账号邮箱和模型 Key 待填写。仅执行静态配置及 Ruff 检查，未新增验收测试或启动部署。
+
+### 本地环境配置合并（2026-09-27）
+
+本地前后端与 Casdoor 三份 env 合并为 `deploy/local/.env`，保留现有有效值和独立 Casdoor 登录密钥，移除旧文件及模板、废弃 Redis 配置。生产 env 未改变。当前入口及模板见部署总 README；此前条目中的分散配置路径属于历史状态。
+
+### 本地 Compose 归档（2026-09-27）
+
+三个本地 Compose 文件移入 `deploy/local/`，脚本、构建与挂载路径、CI 和操作文档同步调整。本地项目名保持 `zm-os`；移动前后四种组合的解析结果完全相同，包括数据卷名、构建目录和附件/登录配置挂载路径。生产配置不变，未启动部署。
+
+### 2026-09-27：归档截图独立删除
+
+- 已归档截图提供确认删除入口，`DELETE /api/agent/v2/intake/screenshots/{aid}` 校验归属、空闲状态、截图版本和幂等键；原子删除截图/工作项并登记原图 GC，旧执行不能再重试。
+- 正式订单外键改为 SET NULL；删除正式订单保留 AI 原图、识别草稿与归档状态，CREATED 工作项不得重复创建。正式订单原有生产任务保护不变。
+- 迁移 `d10f0a120008`；存在独立删除历史时不支持直接 downgrade，应使用备份恢复旧版本。

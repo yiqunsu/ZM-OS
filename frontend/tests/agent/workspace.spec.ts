@@ -1424,3 +1424,45 @@ test("看板撤回生产确认，取消零写入，失败保留，成功回待�
   await expect(page.getByRole("button",{name:"待生产",exact:true})).toBeVisible();
   expect(calls).toBe(2);
 });
+
+test("归档截图删除确认、拒绝和断网重试，独立于正式订单", async ({page}) => {
+  const snap = initial();
+  Object.assign(snap.work_items[0], {source_archived:true, screenshot_revision:1, status:"CREATED", order_id:"order-kept"});
+  snap.session.active_work_item_id = null;
+  await page.route("**/sessions/session-1/snapshot", r => r.fulfill({json:snap}));
+  let calls = 0;
+  const keys: (string | undefined)[] = [];
+  await page.route("**/intake/screenshots/image-1", r => {
+    expect(r.request().method()).toBe("DELETE");
+    expect(r.request().postDataJSON()).toEqual({expected_revision:1});
+    keys.push(r.request().headers()["idempotency-key"]);
+    calls++;
+    if(calls === 1) return r.fulfill({status:409,json:{error:{message:"截图已更新，请刷新后重试"}}});
+    if(calls === 2) return r.abort("failed");
+    snap.work_items = [];
+    return r.fulfill({json:{deleted:true}});
+  });
+  const orderDeletes: string[] = [];
+  page.on("request", r => { if(r.method() === "DELETE" && r.url().includes("/orders/")) orderDeletes.push(r.url()); });
+  await page.goto("/?session=session-1");
+  await page.getByRole("button",{name:/已归档/}).click();
+  const button = page.getByRole("button",{name:/删除 .*第 1 张截图/});
+  await button.click();
+  const dialog = page.getByRole("alertdialog",{name:"删除这张归档截图？"});
+  await expect(dialog).toContainText("已创建的正式订单会保留");
+  await dialog.getByRole("button",{name:"取消",exact:true}).click();
+  expect(calls).toBe(0);
+  await button.click();
+  await dialog.getByRole("button",{name:"删除截图",exact:true}).click();
+  await expect(page.getByRole("alert").filter({hasText:"截图已更新"})).toBeVisible();
+  await expect(button).toBeVisible();
+  await button.click();
+  await dialog.getByRole("button",{name:"删除截图",exact:true}).click();
+  await expect(page.locator(".workbench-error")).toBeVisible();
+  await expect(button).toBeEnabled();
+  await button.click();
+  await dialog.getByRole("button",{name:"删除截图",exact:true}).click();
+  await expect(page.locator(".screenshot-group")).toHaveCount(0);
+  expect(keys[1]).toBe(keys[2]);
+  expect(orderDeletes).toEqual([]);
+});

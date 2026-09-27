@@ -1,8 +1,10 @@
 FROM node:22.19.0-alpine AS base
 
+ENV NEXT_TELEMETRY_DISABLED=1
+
 FROM base AS deps
 WORKDIR /app
-COPY package*.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM base AS builder
@@ -24,14 +26,16 @@ ARG APP_REVISION=unknown
 ENV APP_REVISION=${APP_REVISION}
 LABEL org.opencontainers.image.revision=${APP_REVISION}
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+USER node
 
 EXPOSE 3000
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]

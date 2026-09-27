@@ -1,0 +1,19 @@
+# Optional local tracing: ./deploy/local/up.sh --phoenix
+# No core service depends on the collector being available.
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "127.0.0.1:6006:6006"
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenixdata:/mnt/data
+
+  agent-worker:
+    environment:
+      PHOENIX_ENABLED: "true"
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+
+volumes:
+  phoenixdata:

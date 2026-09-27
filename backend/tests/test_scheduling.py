@@ -22,7 +22,8 @@ from app.models import (
 )
 from app.models.order import OrderStatus
 from app.models.production import TaskStatus
-from app.services import schedule_service
+from app.services.scheduling import inputs as scheduling_inputs
+from app.services.scheduling import service as schedule_service
 
 
 async def _setup_schedulable(
@@ -299,8 +300,8 @@ async def test_apply_schedule_plan_is_atomic_when_second_task_flush_fails(db_ses
         created_by_id="test-user",
         status=SchedulePlanStatus.DRAFT,
         input_order_ids=[order.id for order in orders],
-        input_fingerprint=schedule_service._input_fingerprint(
-            await schedule_service._load_orders(db_session), await schedule_service._load_machines(db_session)
+        input_fingerprint=scheduling_inputs.input_fingerprint(
+            await scheduling_inputs.load_orders(db_session), await scheduling_inputs.load_machines(db_session)
         ),
         tasks=[
             {

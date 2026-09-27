@@ -11,42 +11,6 @@ ShortText = Annotated[str, Field(max_length=2000)]
 OpaqueId = Annotated[str, Field(min_length=1, max_length=128)]
 
 
-class SpecUnitInference(AgentInput):
-    field: Literal["width", "thickness"]
-    unit: Literal["mm", "cm", "μm", "um", "丝", "c"]
-    basis: Annotated[str, Field(min_length=1, max_length=300)]
-
-    @model_validator(mode="after")
-    def compatible_unit(self):
-        allowed = {"mm", "cm"} if self.field == "width" else {"μm", "um", "丝", "c"}
-        if self.unit not in allowed or not self.basis.strip():
-            raise ValueError("推测单位必须适用于对应规格，并说明依据")
-        return self
-
-
-class RawOrderExtraction(AgentInput):
-    """Historical v1 evidence; not accepted from the live model."""
-    schema_version: Literal[1] = 1
-    customer_name: ShortText | None = None
-    product_description: ShortText | None = None
-    width_raw: ShortText | None = None
-    thickness_raw: ShortText | None = None
-    quantity_raw: ShortText | None = None
-    unit_raw: ShortText | None = None
-    formula_raw: ShortText | None = None
-    source_reference_no: ShortText | None = None
-    notes: ShortText | None = None
-    warnings: list[ShortText] = Field(default_factory=list, max_length=20)
-    inferred_spec_units: list[SpecUnitInference] = Field(default_factory=list, max_length=2)
-
-    @field_validator("inferred_spec_units")
-    @classmethod
-    def unique_inference_fields(cls, value):
-        if len({entry.field for entry in value}) != len(value):
-            raise ValueError("每个规格只能有一个单位推测")
-        return value
-
-
 class OrderDraft(AgentInput):
     schema_version: Literal[1] = 1
     customer_id: OpaqueId | None = None

@@ -20,6 +20,7 @@ from app.models.base import generate_id
 from app.schemas.agent import CreateSession, SendMessage
 from app.services.agent_event_service import append_event, canonical_hash
 from app.services.agent_projections import accepted_dto, run_dto, session_dto
+from app.services.scheduling import inputs as scheduling_inputs
 
 
 def fail(code: str, message: str, status: int = 409) -> None:
@@ -200,7 +201,6 @@ async def accept_message(
     await require_idle(db, session)
     require_revision(session, body.expected_state_revision)
     if schedule_order_ids is not None:
-        from app.services import schedule_service
         from app.services.scheduling_lock import lock_scheduling_inputs
 
         if session.agent_type != "SCHEDULING":
@@ -208,7 +208,7 @@ async def accept_message(
         if session.active_plan_id:
             fail("PLAN_EXISTS", "请先处理当前排单草稿")
         await lock_scheduling_inputs(db)
-        pending = {order.id for order in await schedule_service._load_orders(db)}
+        pending = {order.id for order in await scheduling_inputs.load_orders(db)}
         if (
             not schedule_order_ids
             or len(set(schedule_order_ids)) != len(schedule_order_ids)
@@ -350,6 +350,8 @@ async def retry_run(db: AsyncSession, rid: str, uid: str, key: str, expected: in
         .order_by(AgentRun.queued_at.desc(), AgentRun.id.desc())
         .limit(1)
     )
+    if original.config_snapshot.get("source_deleted"):
+        fail("ACTION_STALE", "原截图已删除，无法重试旧执行")
     if original.status != "FAILED" or latest != rid:
         fail("ACTION_STALE", "只能重试最近一次失败的执行")
     if original.work_item_id and original.work_item_id != session.active_work_item_id:

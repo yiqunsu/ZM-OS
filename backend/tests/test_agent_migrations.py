@@ -88,7 +88,7 @@ async def test_empty_and_legacy_upgrade_no_drift(legacy):
         await alembic(db_name, "upgrade", "head")
         await alembic(db_name, "check")
         connection = await asyncpg.connect(**{**ADMIN_DSN, "database": db_name})
-        assert await connection.fetchval("SELECT version_num FROM alembic_version") == "d10f0a120007"
+        assert await connection.fetchval("SELECT version_num FROM alembic_version") == "d10f0a120008"
         constraints = set(
             await connection.fetch(
                 "SELECT conname FROM pg_constraint WHERE connamespace='public'::regnamespace"

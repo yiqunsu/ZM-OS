@@ -124,7 +124,9 @@ async def item_command(db: AsyncSession, iid: str, uid: str, key: str, kind: str
         "returned_existing": returned_existing,
     }
     if returned_existing:
-        order = await db.get(Order, item.order_id)
+        order = await db.get(Order, item.order_id) if item.order_id else None
+        if order is None:
+            sessions.fail("ORDER_DELETED", "正式订单已删除，识别记录保留，不能重复创建")
         result["order"] = {"id": order.id, "order_no": order.order_no}
     else:
         require_item_revision(item, payload["expected_revision"])

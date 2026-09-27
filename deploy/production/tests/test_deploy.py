@@ -91,8 +91,9 @@ def test_release_builds_before_backup_and_migration_without_model_calls(release)
         "build frontend",
         "up -d postgres",
         "verify-casdoor.sh",
+        "stop frontend backend agent-worker",
         "backup.sh",
-        "run --rm backend alembic upgrade head",
+        "run --rm --no-deps backend alembic upgrade head",
         "up -d --remove-orphans backend frontend caddy",
         "up -d agent-worker",
         "exec -T backend alembic check",
@@ -111,8 +112,8 @@ def test_release_builds_before_backup_and_migration_without_model_calls(release)
         ("validate-env.sh", "build backend"),
         ("build backend", "up -d postgres"),
         ("build frontend", "up -d postgres"),
-        ("backup.sh", "run --rm backend alembic upgrade head"),
-        ("run --rm backend alembic upgrade head", "up -d --remove-orphans backend frontend caddy"),
+        ("backup.sh", "run --rm --no-deps backend alembic upgrade head"),
+        ("run --rm --no-deps backend alembic upgrade head", "up -d --remove-orphans backend frontend caddy"),
         ("exec -T backend alembic check", None),
     ],
 )
@@ -137,3 +138,19 @@ def test_disabled_agent_stops_worker(release):
     assert result.returncode == 0, result.stderr
     assert "stop agent-worker" in events
     assert "up -d agent-worker" not in events
+
+
+@pytest.mark.parametrize("failure", ["backup.sh", "run --rm --no-deps backend alembic upgrade head"])
+def test_failed_backup_or_migration_leaves_writers_stopped(release, failure):
+    result, events = release(fail=failure)
+    assert result.returncode != 0
+    assert events.index("stop frontend backend agent-worker") < events.index(failure)
+    assert "up -d --remove-orphans backend frontend caddy" not in events
+    assert "up -d agent-worker" not in events
+
+
+@pytest.mark.parametrize("failure", ["build backend", "build frontend"])
+def test_build_failure_does_not_stop_running_applications(release, failure):
+    result, events = release(fail=failure)
+    assert result.returncode != 0
+    assert "stop frontend backend agent-worker" not in events

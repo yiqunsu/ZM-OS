@@ -29,9 +29,9 @@ venv/bin/python -m pytest -q
 在仓库根目录运行：
 
 ```bash
-docker compose exec backend alembic upgrade head
-docker compose exec backend alembic current
-docker compose exec backend alembic check
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend alembic upgrade head
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend alembic current
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend alembic check
 ```
 
 ### 前端
@@ -48,8 +48,8 @@ npm run build
 在仓库根目录运行：
 
 ```bash
-docker compose config --quiet
-docker compose ps
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml config --quiet
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml ps
 curl -fsS http://localhost:8000/health
 ```
 
@@ -64,7 +64,7 @@ curl -fsS http://localhost:8000/health
 | 看板与排产 | 后端事务测试、失败回滚、并发/重复操作测试、前端交互验证 |
 | Phoenix / OpenTelemetry | 启用与禁用启动路径、Trace 可见性、采集端不可用时业务 API 仍正常 |
 | Agent | 受限工具循环、会话隔离、确认与版本保护、SSE 手动对话 |
-| Docker / 环境配置 | `docker compose config --quiet`、重建受影响镜像、健康检查 |
+| Docker / 环境配置 | `docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml config --quiet`、重建受影响镜像、健康检查 |
 | 仅文档 | 检查链接、命令和文件路径；确认未与 Ground Truth/ADR 冲突 |
 
 ## 4. 后端测试规则
@@ -112,17 +112,17 @@ curl -fsS http://localhost:8000/health
 修改 Phoenix、OpenInference 或相关依赖时至少验证：
 
 ```bash
-docker compose config --quiet
-docker compose up -d --build phoenix backend
-docker compose ps phoenix backend
-docker compose logs --tail=100 backend
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml config --quiet
+./deploy/local/up.sh --phoenix
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml -f deploy/local/compose.phoenix.yml ps phoenix agent-worker
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml logs --tail=100 agent-worker
 curl -fsS http://localhost:6006 >/dev/null
 ```
 
 还应人工发起一次 Agent 对话，并确认：
 
 1. Phoenix 的 `filmos-agent` 项目出现 LangChain/LangGraph Trace；
-2. Trace 能看到模型调用、工具调用和耗时；
+2. Trace 能看到执行步骤和耗时，模型输入、输出和图片保持隐藏；
 3. `PHOENIX_ENABLED=false` 时后端正常启动且不发送 Trace；
 4. Phoenix 容器停止时，非 Agent 业务 API 不受影响；
 5. Trace 中没有密码、JWT、Cookie、API Key 或数据库凭证。
@@ -136,9 +136,9 @@ curl -fsS http://localhost:6006 >/dev/null
 
 `tests/test_admission.py` 验证两类 Agent 对额外 reason 解释字段的兼容、非法枚举/未知字段/截断回复的拒绝、实际 ChatOpenAI HTTP 适配器的 JSON 请求，以及独立数据库连接下 Worker 的明确失败事件和输入/草稿保留。
 
-`tests/test_unit_inference.py` 验证规格单位推测的预填、原始证据保留、明确单位优先、不支持的厚度 g 拒绝猜测、无依据无默认值、同图多单独立保存，以及手改后的推测提示生命周期。全栈同图多单场景验证无单位数值经推测换算后直接出现在输入框。
+`tests/test_unit_inference.py` 通过维护模块验证历史 v1 转换，并通过新版 Graph 验证规格单位推测的预填、原始证据保留、明确单位优先、不支持的厚度 g 拒绝猜测、无依据无默认值、同图多单独立保存，以及手改后的推测提示生命周期。全栈同图多单场景验证无单位数值经推测换算后直接出现在输入框。
 
-`tests/test_quantity_extraction.py` 覆盖数量夹带单位/交付短语、千分位、单位换算、范围/冲突拒绝、同图数量独立保存，以及历史空数量定向修复的幂等、事件、人工值保护和选择状态不变。修复脚本默认 dry-run，apply 必须先写私有备份。
+`tests/test_quantity_extraction.py` 覆盖数量夹带单位/交付短语、千分位、单位换算、范围/冲突拒绝、同图数量独立保存，以及历史空数量定向修复的幂等、事件、人工值保护和选择状态不变。修复入口为 `backend/scripts/maintenance/repair_intake_quantities.py`，默认 dry-run，apply 必须先写私有备份。
 
 `tests/test_extraction_schema.py` 验证强类型模型输出：字符串/bool/非有限或越界数值拒绝、单位枚举、必填nullable字段、原始单号类型、推测证据一致性、原文不兜底解析、字段级纠错重试及二次失败不落草稿。
 
@@ -230,9 +230,40 @@ deploy/production/tests/smoke-backup-restore.sh
 
 部署一致性：`tests/test_model_transport.py` 覆盖显式 thinking、新旧模型别名和生成上限；
 该文件同时覆盖无效模型参数拒绝。生产部署不再自动调用付费模型或比较运行报告。
-`deploy/production/tests/test_deploy.py` 使用隔离的假命令验证发布顺序、已有镜像仍重新检查构建、未提交改动标记和失败时停止，不连接业务数据库或真实模型。
+`deploy/production/tests/test_deploy.py` 使用隔离的假命令验证发布顺序、构建失败保留原服务、备份/迁移前停止写入且失败不重启、已有镜像仍重新检查构建、未提交改动标记和失败时停止，不连接业务数据库或真实模型。
 日常操作见 [生产部署](../deploy/production/README.md)；涉及模型行为的改动仍需单独验证实际图片功能，不能以容器健康替代。
 
 识别诊断回归：`test_extraction_schema.py` 验证逐次字段路径/类型、未知键和值脱敏；
 `test_order_workbench.py` 验证原始识别错误不被 Worker 通用失败覆盖，重试失败独立更新。
 这些测试使用合成响应，不代表已复现线上截图的具体字段错误。
+
+
+## 12. 本地与生产部署配置
+
+Python CI 与容器统一使用 3.12；后端测试依赖也使用 `requirements.lock` 约束。
+`deployment-ci.yml` 在部署脚本、Compose 和构建配置变更时运行：
+
+```bash
+bash -n deploy/local/up.sh deploy/production/scripts/deploy.sh
+backend/venv/bin/python -m pytest deploy/production/tests -q
+```
+
+`test_local_deploy.py` 使用隔离的假 Docker/Git 验证默认、Casdoor 和 Phoenix
+组合的启动顺序，以及配置/构建/数据库/迁移失败时不会启动 API 或 Worker；
+Compose 渲染验证默认四个服务、共享后端镜像、健康依赖和可选追踪。
+不连接业务数据库，不调用模型，不创建真实容器。
+部署 CI 还构建两个生产 Dockerfile；这些检查不能替代真实健康检查和登录验收。
+首次运行验证应在明确选择的本地数据环境执行启动脚本，再检查数据库迁移、
+API、Worker 和前端健康。历史卷不得为通过测试而删除。
+
+## 13. 目录拆分与共享契约
+
+排产回归继续位于 `tests/test_scheduling.py`、`test_scheduling_v2.py`、`test_meter_scheduling.py`，覆盖输入变化、并发保护、计划执行及米数/重量规则；目录调整不能改变事务所有权。
+
+从仓库根目录执行 `python3 backend/scripts/export_agent_contract.py --check` 检查 SSE 事件名称与前端订阅契约一致。订单表单拆分后继续执行 `npm run test:agent`，覆盖手工/AI 草稿、主数据弹窗、窄屏和异常恢复。
+
+后端 Docker 构建分别验证 `--target local` 与 `--target production`；前端共用 Dockerfile，生产验证需传 `--build-arg NEXT_PUBLIC_API_URL=/api --build-arg NEXT_PUBLIC_AUTH_PROVIDER=casdoor`。
+
+本地/生产配置对照由 `test_local_deploy.py` 验证：本地 Casdoor 与生产共用应用源码、登录镜像、Worker 命令和默认模型参数，API/Worker 配置与附件卷一致。完整登录与反向代理联调仍需单独验收。
+
+归档删除回归：`test_screenshot_library.py` 验证仅归档可删、版本保护、幂等、失败回滚、GC 登记与正式订单独立删除；浏览器验证确认取消、后端拒绝、网络失败重试和归档列表更新。迁移 008 验证空库/历史库升级和结构无漂移。

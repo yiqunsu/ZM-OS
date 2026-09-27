@@ -3,41 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentError, agentApi } from "./api";
 import type { Event, Snapshot } from "./types";
 
-const EVENT_KINDS = [
-  "session.created",
-  "session.archived",
-  "session.restored",
-  "session.deleting",
-  "session.state_changed",
-  "message.accepted",
-  "message.completed",
-  "command.accepted",
-  "run.queued",
-  "run.started",
-  "run.progress",
-  "run.succeeded",
-  "run.failed",
-  "run.cancelled",
-  "admittance.decided",
-  "work_item.queued",
-  "work_item.activated",
-  "work_item.deferred",
-  "work_item.closed",
-  "work_item.created",
-  "recognition.completed",
-  "recognition.failed",
-  "draft.updated",
-  "plan.generated",
-  "plan.updated",
-  "plan.superseded",
-  "plan.closed",
-  "plan.applied",
-  "tool.started",
-  "tool.succeeded",
-  "tool.failed",
-  "tool.abandoned",
-  "assistant.delta",
-];
+import { EVENT_KINDS } from "./contracts.generated";
 
 export function useAgentSession(sid: string | null) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);

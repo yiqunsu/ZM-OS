@@ -1,6 +1,6 @@
 # FilmOS Frontend
 
-首页提供创建订单和排单两个专用入口，使用 `components/agent/`。桌面显示会话导航、对话与工作区，手机可切换对话/工作区。实际生产队列每 15 秒刷新；草稿确认绑定保存后的版本。旧聊天框和旧历史页已删除。
+首页提供创建订单和排单两个专用入口，使用 `components/agent/`。录单使用截图列表、原图和共用订单表单，排单使用独立草案工作台。实际生产队列每 15 秒刷新；草稿确认绑定保存后的版本。
 
 Next.js（App Router）前端，是系统的 **UI 层**：渲染界面、处理登录、调用后端 API。**不直连数据库**，所有数据都经 FastAPI 后端。
 
@@ -10,7 +10,7 @@ Next.js（App Router）前端，是系统的 **UI 层**：渲染界面、处理�
 
 - **UI 渲染**：订单列表、排产看板（拖拽）、基础数据管理、AI 助手对话。
 - **登录鉴权**：生产环境用 Auth.js 对接 Casdoor OIDC，并在服务端刷新短期 access token；`proxy.ts` 保护页面，未登录跳转 `/login`。Credentials 只保留给本地开发。
-- **调用后端**：所有请求经 `lib/api.ts` 统一封装，自动带上 JWT；AI 对话用 SSE 流式接收。
+- **调用后端**：普通业务请求经 `lib/api.ts` 携带 JWT；Agent 请求经 `components/agent/api.ts` 与 Next.js 同源代理，SSE 接收持久任务事件。
 
 后端返回什么，前端就渲染什么——业务规则（状态流转、删除保护等）都在后端，前端不重复实现。
 
@@ -31,7 +31,13 @@ app/                    # App Router 页面
 components/
 ├── Sidebar.tsx         #   侧边导航
 ├── kanban/             #   看板（dnd-kit 拖拽）
-├── orders/             #   订单表单
+├── orders/form/        #   共用订单表单
+│   ├── OrderForm.tsx    #     布局、加载与提交入口
+│   ├── useOrderForm.ts #     数据加载、编辑状态与 API 操作
+│   ├── OrderSections.tsx #   业务字段展示
+│   ├── MasterDataDialogs.tsx # 客户/产品/配方弹窗
+│   ├── fields.tsx      #     表单内部字段组件
+│   └── model.ts        #     类型与字段转换（提示组件/样式同目录）
 ├── settings/           #   各基础数据 Tab
 ├── agent/              #   专用会话、草稿、SSE 与确认
 └── ui/                 #   基础组件（button/dialog/input…）
@@ -52,31 +58,38 @@ proxy.ts                # 路由保护 + OWNER 专属设置页保护
 - **鉴权**：生产环境的 Auth.js 加密 Cookie 保存 Casdoor access/refresh token；浏览器 Session 只得到短期 access token、本地用户 ID、邮箱与角色。`lib/api.ts` 把短期 Token 放进 `Authorization` 头，FastAPI 通过 JWKS 验证并执行 RBAC。
 - **刷新与退出**：refresh token 和 OIDC client secret 不返回浏览器。刷新失败会清理登录状态；正常退出同时清理 Auth.js 与 Casdoor SSO 会话。
 - **权限展示**：OPERATOR 看不到基础数据入口且不能直接访问 `/settings`，但真正的写权限仍由 FastAPI 决定。
-- **API 地址**：由构建期变量 `NEXT_PUBLIC_API_URL` 指定。本地 Docker 镜像默认使用 `http://localhost:8000/api`，生产镜像默认使用同源 `/api`。
+- **API 地址**：由构建期变量 `NEXT_PUBLIC_API_URL` 指定。本地 Docker 镜像默认使用 `http://localhost:8000/api`，生产 Compose 显式传入同源 `/api`。
 
 ---
+
+SSE 事件名称由后端 `EVENT_KINDS` 生成到 `components/agent/contracts.generated.ts`，订阅与事件类型共用此文件。修改后端事件后从仓库根目录执行 `python3 backend/scripts/export_agent_contract.py`；CI 通过 `--check` 检查漂移。此生成范围仅包含事件名称，业务 DTO 仍需随 API 变更同步维护。
+
+本地和生产共用 `frontend/Dockerfile`；生产 Compose 显式传入 Casdoor 登录模式和 API 地址，运行时均使用非 root 用户。
 
 ## 开发
 
 ```bash
-npm install
+npm ci
 npm run dev          # 开发服务器（默认 3000）
 npm run lint         # ESLint
 npm run build        # 生产构建（含 TypeScript 检查）
 ```
 
-通常直接用根目录的 `docker compose up -d` 一起跑，前端会自动连上后端容器。
+容器部署使用根目录的 `./deploy/local/up.sh`，先完成迁移再启动应用；可选 Casdoor/Phoenix 见 [根 README](../README.md)。
 
-`NEXT_PUBLIC_*` 会在 Next.js 构建时写入浏览器 bundle。根 Compose 会把 `NEXT_PUBLIC_API_URL` 作为 build arg 传入；如需覆盖，在运行 Compose 前通过 shell 或仓库根目录 `.env` 设置，然后重新执行 `docker compose build frontend`。只修改容器的 runtime `env_file` 不会改变已经构建的前端地址。
+`NEXT_PUBLIC_*` 会在 Next.js 构建时写入浏览器 bundle。根 Compose 会把 `NEXT_PUBLIC_API_URL` 作为 build arg 传入；如需覆盖，在 `deploy/local/.env` 中修改后重新运行本地启动脚本。只改变容器运行时变量不会改变已经构建的前端地址。
 
-### 环境变量（`frontend/.env.local`）
+### 前端运行时变量
+
+本地配置来源是 `deploy/local/.env`；下表是 Compose 分配给前端或代码支持的变量，不代表每项都需要手动填写。Casdoor 模式使用 `CASDOOR_AUTH_SECRET` 映射到前端的 `AUTH_SECRET`。
 
 | 变量 | 说明 |
 |---|---|
 | `AUTH_PROVIDER` | 服务端 `local` 或 `casdoor`；生产固定 `casdoor` |
 | `NEXT_PUBLIC_AUTH_PROVIDER` | 构建登录页模式；生产固定 `casdoor` |
 | `AUTH_SECRET` / `NEXTAUTH_SECRET` | Auth.js Cookie 密钥；仅本地模式同时用于开发 JWT |
-| `NEXTAUTH_URL` | Auth.js 回调地址 |
+| `AUTH_URL` / `NEXTAUTH_URL` | Auth.js 回调地址 |
+| `BACKEND_INTERNAL_URL` | Next.js 服务端访问后端的地址，容器内默认 `http://backend:8000` |
 | `CASDOOR_ISSUER` / `CASDOOR_PUBLIC_URL` | 外部 Casdoor OIDC origin |
 | `CASDOOR_INTERNAL_URL` | Next.js 容器访问 Casdoor 的私网地址 |
 | `CASDOOR_CLIENT_ID` / `CASDOOR_CLIENT_SECRET` | OIDC 客户端凭证；secret 仅服务端可见 |
@@ -84,3 +97,5 @@ npm run build        # 生产构建（含 TypeScript 检查）
 | `NEXT_PUBLIC_CASDOOR_CLIENT_ID` | 联合退出使用的公开 client ID |
 | `NEXT_PUBLIC_API_URL` | 构建期后端 API base，必须包含后端路由前缀 `/api` |
 | `NEXT_PUBLIC_SENTRY_DSN` | 可选，前端错误追踪 |
+
+Docker 本地部署统一读取仓库根目录下的 `deploy/local/.env`，生产读取 `deploy/production/.env.production`。直接在宿主机运行开发进程时，需要将对应配置显式注入进程；框架不会自动读取部署目录。后端数据库地址需使用宿主机地址，前端 `BACKEND_INTERNAL_URL` 也需指向宿主机后端。

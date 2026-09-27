@@ -49,8 +49,8 @@ npm run build
 数据库和容器（在仓库根目录）：
 
 ```bash
-docker compose exec backend alembic check
-docker compose config --quiet
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml exec backend alembic check
+docker compose --env-file deploy/local/.env -f deploy/local/docker-compose.yml config --quiet
 ```
 
 详细测试矩阵以 `meta/TESTING.md` 为准。

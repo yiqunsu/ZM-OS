@@ -4,10 +4,19 @@ import base64
 import json
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, cast, func, or_, select, tuple_
+from sqlalchemy import Date, cast, delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentCommand, ChatAttachment, ChatSession, OrderIntakeItem
+from app.models import (
+    AgentCommand,
+    AgentFileGcJob,
+    AgentRun,
+    ChatAttachment,
+    ChatMessage,
+    ChatSession,
+    OrderIntakeItem,
+    SessionEvent,
+)
 from app.models.base import generate_id
 from app.services import agent_session_service as sessions
 from app.services.agent_event_service import append_event, canonical_hash
@@ -243,6 +252,79 @@ async def archive_screenshot(
         command_id=cid,
     )
     result = {"attachment_id": aid, "archived": archived, "revision": attachment.intake_revision}
+    db.add(
+        AgentCommand(
+            id=cid,
+            user_id=uid,
+            session_id=session.id,
+            idempotency_key=key,
+            kind=kind,
+            request_hash=digest,
+            payload=payload,
+            target_id=aid,
+            expected_revision=expected_revision,
+            http_status=200,
+            result=result,
+        )
+    )
+    await db.commit()
+    return result
+
+
+async def delete_screenshot(
+    db: AsyncSession,
+    aid: str,
+    uid: str,
+    key: str,
+    *,
+    expected_revision: int,
+) -> dict:
+    """Delete an archived source atomically; business Orders have a separate lifecycle."""
+    kind = "DELETE_SCREENSHOT"
+    payload = {"expected_revision": expected_revision}
+    digest = canonical_hash({"operation": kind, "attachment_id": aid, **payload})
+    replay = await sessions.command_replay(db, uid, key, digest)
+    if replay:
+        return replay.result
+    attachment = await db.get(ChatAttachment, aid)
+    if not attachment or not attachment.session_id:
+        sessions.fail("RESOURCE_NOT_FOUND", "截图不存在", 404)
+    session = await sessions.require_session(db, attachment.session_id, uid, lock=True)
+    # Another command may have deleted this source while we waited for the session lock.
+    attachment = await db.scalar(
+        select(ChatAttachment).where(ChatAttachment.id == aid).execution_options(populate_existing=True)
+    )
+    if not attachment or session.agent_type != "ORDER_INTAKE" or attachment.status != "BOUND":
+        sessions.fail("RESOURCE_NOT_FOUND", "订单截图不存在", 404)
+    await sessions.require_idle(db, session)
+    if attachment.intake_revision != expected_revision:
+        sessions.fail("SCREENSHOT_REVISION_CONFLICT", "截图已更新，请刷新后重试")
+    if attachment.intake_archived_at is None and session.status != "ARCHIVED":
+        sessions.fail("SCREENSHOT_NOT_ARCHIVED", "请先归档截图，再删除")
+    item_ids = list(
+        await db.scalars(select(OrderIntakeItem.id).where(OrderIntakeItem.source_attachment_id == aid))
+    )
+    if session.active_work_item_id in item_ids:
+        session.active_work_item_id = None
+    for run in await db.scalars(select(AgentRun).where(AgentRun.work_item_id.in_(item_ids))):
+        run.config_snapshot = {**run.config_snapshot, "source_deleted": True}
+    for model in (ChatMessage, AgentRun, SessionEvent):
+        await db.execute(update(model).where(model.work_item_id.in_(item_ids)).values(work_item_id=None))
+    await db.execute(delete(OrderIntakeItem).where(OrderIntakeItem.id.in_(item_ids)))
+    db.add(AgentFileGcJob(session_id=session.id, attachment_id=aid, storage_key=attachment.storage_key))
+    await db.delete(attachment)
+    cid = generate_id()
+    session.state_revision += 1
+    append_event(
+        db,
+        session,
+        "session.state_changed",
+        {"state_revision": session.state_revision, "action": kind, "source_attachment_id": aid},
+        actor_kind="USER",
+        actor_user_id=uid,
+        command_id=cid,
+    )
+    result = {"attachment_id": aid, "deleted": True, "file_cleanup": "pending"}
     db.add(
         AgentCommand(
             id=cid,

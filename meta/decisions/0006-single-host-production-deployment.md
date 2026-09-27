@@ -7,7 +7,7 @@
 
 FilmOS 初期需要以较低成本部署到一台腾讯云轻量应用服务器。目标实例位于上海，配置为 2 核 CPU、4GB 内存、60GB SSD。当前业务规模不要求多节点高可用，但生产环境必须具备持久化、HTTPS、受控发布、日志轮转和可恢复的数据库备份。
 
-现有根目录 `docker-compose.yml` 服务于本地开发，会公开内部端口并启动 Redis 与 Phoenix，不能直接作为生产配置使用。域名 `zmorder.cn` 正在办理 ICP 备案，备案通过前不得对公网开放网站。
+决策制定时的根目录 `docker-compose.yml` 服务于本地开发，会公开内部端口并启动 Redis 与 Phoenix，不能直接作为生产配置使用。域名 `zmorder.cn` 正在办理 ICP 备案，备案通过前不得对公网开放网站。
 
 ## 决策
 
@@ -20,7 +20,7 @@ FilmOS 初期需要以较低成本部署到一台腾讯云轻量应用服务器�
 - 发布采用服务器 Git 拉取加受控部署脚本，迁移通过 Alembic 显式执行；
 - 本机每天生成压缩数据库备份并保留七天；
 - 初期生产环境不部署 Redis、Phoenix、Sentry、Loki 或 COS；
-- 开发 Compose 行为保持不变。
+- 本决策当时不改变开发 Compose 行为。
 
 生产操作细节以 `deploy/production/README.md` 为准。
 
@@ -49,3 +49,7 @@ FilmOS 初期需要以较低成本部署到一台腾讯云轻量应用服务器�
 - 发布频率需要 CI/CD、镜像仓库或零停机策略；
 - 多实例或外部 Agent 集成产生真实的队列、分布式锁、共享限流或发布订阅需求；
 - Phoenix 或 Sentry 的生产收益、访问控制、保留期和费用已经明确。
+
+## 后续实现更新（2026-09-27）
+
+本地 Compose 已移除 Redis，Phoenix 改为显式启用的可选 overlay；默认启动前端、API、Worker 和 PostgreSQL 四个服务。生产仍使用独立 Compose 配置，本地和生产共用前后端各自的 Dockerfile，以 target 和构建参数表达差异。上述调整不改变本 ADR 的单机生产部署决策。当前操作以[根 README](../../README.md)和[生产部署](../../deploy/production/README.md)为准。

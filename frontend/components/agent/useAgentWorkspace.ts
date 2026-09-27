@@ -12,7 +12,6 @@ export function useAgentWorkspace(act: AgentOperation) {
         type === "ORDER_INTAKE" ? "/intake/workspace" : "/scheduling/workspace",
         {},
       );
-      window.dispatchEvent(new Event("agent:sessions-changed"));
       router.push(`/?session=${encodeURIComponent(created.session.id)}`);
     });
   };

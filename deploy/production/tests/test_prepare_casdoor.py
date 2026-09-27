@@ -154,7 +154,6 @@ class PrepareCasdoorTests(unittest.TestCase):
         frontend_boundaries = [
             REPO_ROOT / "frontend/auth.ts",
             REPO_ROOT / "frontend/Dockerfile",
-            REPO_ROOT / "deploy/production/frontend.Dockerfile",
             REPO_ROOT / "deploy/production/compose.yml",
         ]
         for path in frontend_boundaries:

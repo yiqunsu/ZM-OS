@@ -86,6 +86,7 @@ COMMAND_KINDS = (
     "RECOGNIZE_ITEM",
     "ARCHIVE_SCREENSHOT",
     "RESTORE_SCREENSHOT",
+    "DELETE_SCREENSHOT",
     "CREATE_SESSION",
     "NEXT_ITEM",
     "SELECT_ITEM",
@@ -289,7 +290,7 @@ class OrderIntakeItem(Base):
         enum_check(
             "recognition_status", ("NOT_STARTED", "SUCCEEDED", "FAILED"), "ck_order_intake_items_recognition"
         ),
-        CheckConstraint("(status = 'CREATED') = (order_id IS NOT NULL)", name="ck_order_intake_items_order"),
+        CheckConstraint("order_id IS NULL OR status = 'CREATED'", name="ck_order_intake_items_order"),
         CheckConstraint("revision > 0 AND queue_position > 0", name="ck_order_intake_items_revision"),
         CheckConstraint(
             "octet_length(draft::text) <= 65536 AND octet_length(extraction::text) <= 65536",
@@ -318,7 +319,7 @@ class OrderIntakeItem(Base):
     draft: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     issues: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    order_id: Mapped[str | None] = mapped_column(ForeignKey("orders.id", ondelete="RESTRICT"), unique=True)
+    order_id: Mapped[str | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), unique=True)
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

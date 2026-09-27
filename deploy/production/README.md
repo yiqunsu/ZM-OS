@@ -1,8 +1,10 @@
 # FilmOS production deployment
 
+部署目录和环境选择见[部署总入口](../README.md)。
+
 > 日常发布只需拉取代码并运行 `./deploy/production/scripts/deploy.sh`，见第 6 节。
 
-本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、AI Worker、Casdoor 和 PostgreSQL 组成；后端与 Worker 共用镜像。Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
+本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、AI Worker、Casdoor 和 PostgreSQL 组成；后端与 Worker 共用镜像。本地与生产统一使用 `backend/Dockerfile` 和 `frontend/Dockerfile`；本 Compose 选择后端 `production` target，并显式传入前端 Casdoor 模式及 API 地址。Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 
 ICP备案通过前，Caddy 只监听服务器 `127.0.0.1`，必须通过 SSH 隧道访问。备案通过前不要添加公网 DNS，也不要开放公网 80/443。
 
@@ -61,7 +63,7 @@ openssl rand -base64 32 # 两个 Casdoor 初始账号密码
 
 ```dotenv
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-flash
+LLM_MODEL=deepseek-v4-flash
 LLM_VISION_MODEL=deepseek-flash
 LLM_VISION_THINKING=disabled
 LLM_VISION_MAX_TOKENS=8192
@@ -198,7 +200,7 @@ git pull --ff-only
 ./deploy/production/scripts/deploy.sh
 ```
 
-脚本只负责配置校验、顺序构建、登录服务准备、已有数据备份、数据库迁移、启动和健康/数据库结构检查。不会自动调用付费模型，也不生成发布报告或要求本地/云端报告对照。成功后在网页上检查登录和一次 AI 操作；容器健康不等于模型功能已验证。
+脚本只负责配置校验、顺序构建、登录服务准备、停止应用写入、已有数据备份、数据库迁移、启动和健康/数据库结构检查。不会自动调用付费模型，也不生成发布报告或要求本地/云端报告对照。成功后在网页上检查登录和一次 AI 操作；容器健康不等于模型功能已验证。
 
 前后端固定使用 `production` 镜像标签，后端和 Worker 共用一个镜像。每次都让 Docker 检查构建缓存，因此同一提交修改前端域名参数也会重新构建对应步骤。Git revision 仅作镜像内版本记录；未提交改动会显示警告并标记 `-dirty`，不会自动清理或阻止发布。推荐从已提交的 `main` 发布。
 
@@ -206,7 +208,7 @@ git pull --ff-only
 
 生产 Compose 默认从腾讯云 HTTPS PyPI 镜像下载 Python 依赖，以避开服务器连接 `files.pythonhosted.org` 超时的问题。现有环境文件无需新增配置。需要切换源时，可在 `.env.production` 设置 `PIP_INDEX_URL=https://pypi.org/simple`（或其他受信 HTTPS 镜像），再运行部署脚本；这个值传给 Docker 构建，宿主机的 pip 配置不会自动传入。依赖版本仍由原锁文件约束；镜像源缺包时应检查同步状态或切换源，不删除版本约束、不关闭 TLS 校验。
 
-构建失败会停在切换服务之前；备份失败不会执行迁移；迁移失败不会启动新应用。失败时保留日志，不删除数据库卷、不自动恢复备份。固定标签不提供按 Git 标签直接回滚镜像的能力；需要回退时检出兼容的旧提交并重新构建，数据库另行评估。
+构建失败不会停止现有应用；登录服务验证完成后，先停止 frontend、backend、agent-worker，再备份和迁移。备份失败不会执行迁移，备份或迁移失败都会保持应用停止；应排查后重新发布，不会自动恢复旧进程。失败时保留日志，不删除数据库卷、不自动恢复备份。固定标签不提供按 Git 标签直接回滚镜像的能力；需要回退时检出兼容的旧提交并重新构建，数据库另行评估。
 
 查看状态与日志：
 
@@ -294,3 +296,30 @@ CASDOOR_REDIRECT_URI=https://app.zmorder.cn/api/auth/callback/casdoor
 - 不为了“未来可能需要”提前加入 Redis；
 - 不在未明确访问控制、保留策略、隐私与成本前把 Phoenix、Sentry 或 Loki 加入生产；
 - 不自动恢复迁移前备份。数据库恢复是破坏性操作，必须人工选择。
+
+## 本地与生产的一致性边界
+
+本地统一入口为 `./deploy/local/up.sh`；加 `--casdoor` 使用与生产相同的 OIDC/RBAC 登录方式，加 `--phoenix` 开启可选追踪。本地 Casdoor 初始化工具位于 `deploy/local/casdoor/`，配置与说明统一归入本地 env 和部署总 README。
+
+| 项目 | 本地 Casdoor 模式 | 生产 |
+| --- | --- | --- |
+| 业务源码、数据库迁移、Worker | 同一工作区代码和 Alembic 链路，API/Worker 共用镜像 | 相同；要对比效果须部署相同提交 |
+| 登录 | Casdoor，localhost 地址 | 同一 Casdoor 镜像，正式或隧道域名 |
+| 请求入口 | 前端 3000、API 8000、登录 8001 | Caddy 统一入口；公开模式使用 HTTPS |
+| 发布步骤 | 构建、准备依赖、停写、迁移、启动、健康/结构检查 | 同样步骤，另有配置/登录验证与迁移前备份 |
+| 模型 | `deploy/local/.env` | `.env.production`；默认参数相同，实际值需保持一致 |
+| 后端运行用户 | local target，保留本地卷访问方式 | production target，非 root 用户，启用代理头处理 |
+| 数据库镜像 | `postgres:16` | `postgres:16.10-alpine`；同主版本但非相同镜像 |
+| 运维 | 方便本机访问；备份按需手动执行 | 内部网络、重启策略、日志轮转、资源限制和持久备份 |
+
+自动化配置对照覆盖共享源码、登录模式、Worker 命令、API/Worker 配置及卷一致性、默认模型参数。它不能替代完整 OIDC、反向代理/SSE、真实模型和业务数据验收。数据库镜像对齐前应确认已有卷的版本并备份，不直接降级已有数据库。
+
+## 默认配置（2026-09-27）
+
+- 默认启用前端、API、Worker、PostgreSQL、Casdoor、Caddy；`AGENT_V2_ENABLED=true`。Redis、OpenClaw、Phoenix 不部署，Sentry 关闭。
+- 默认使用 Casdoor 密码登录，微信登录关闭；平台管理员为 `admin`，日常业务管理员为 `owner`。两个账号使用不同密码，邮箱需填写实际地址；迁移旧账号时业务管理员邮箱应与原账号一致。
+- 数据库账号分别为 `filmos`、`casdoor`，数据库密码、登录密码、Auth.js 密钥及 OIDC 客户端密钥各自随机生成，不使用通用默认密码。
+- 模型默认沿用本地配置：地址 `https://api.deepseek.com`，文本 `deepseek-v4-flash`，视觉 `deepseek-flash`；视觉 thinking 关闭，输出上限 8192，超时 60 秒。这里只同步配置，未调用模型验证可用性；API Key 需自行填写。
+- 访问方式暂保留私有隧道模式；不会自动打开公网监听。公网模式配置见前文。
+
+当前工作区已准备被 Git 忽略的 `.env.production`（权限 0600），独立随机密码已写入但不在文档展示。使用前填写两个真实邮箱和 `LLM_API_KEY`；不要再次复制模板覆盖它。生产配置文件包含秘密，仅通过私密渠道传到目标服务器。

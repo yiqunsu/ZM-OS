@@ -6,7 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://filmos:filmos@localhost:5432/filmos"
-    REDIS_URL: str = "redis://redis:6379"
     AUTH_SECRET: str = "dev-secret-change-me"
     AUTH_PROVIDER: Literal["local", "casdoor"] = "local"
     CASDOOR_ISSUER: str = ""
@@ -22,12 +21,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # ─── Agent / LLM ──────────────────────────────────────────────────────────
-    # OpenAI-compatible contract. The defaults target Alibaba Cloud Model Studio;
+    # OpenAI-compatible contract. Defaults match the local DeepSeek configuration;
     # switching providers only requires changing these three environment values.
     LLM_API_KEY: str = ""
-    LLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    LLM_MODEL: str = "qwen3.7-plus"
-    LLM_VISION_MODEL: str = "qwen3-vl-plus"
+    LLM_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-v4-flash"
+    LLM_VISION_MODEL: str = "deepseek-flash"
     LLM_REQUEST_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
     LLM_VISION_THINKING: Literal["provider_default", "disabled", "enabled"] = "disabled"
     LLM_VISION_MAX_TOKENS: int = Field(default=8192, ge=256, le=131072)

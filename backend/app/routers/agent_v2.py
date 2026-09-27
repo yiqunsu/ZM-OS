@@ -32,7 +32,7 @@ from app.services import agent_schedule_service as plans
 from app.services import agent_session_service as service
 from app.services import order_intake_item_service as intake
 from app.services import order_screenshot_service as screenshots
-from app.services import schedule_service as schedules
+from app.services.scheduling import service as schedules
 
 
 class AgentRoute(APIRoute):
@@ -154,6 +154,17 @@ async def intake_screenshots(
     limit: int = Query(20, ge=1, le=50),
 ):
     return await screenshots.list_screenshots(db, user.id, tab, cursor, limit)
+
+
+@router.delete("/intake/screenshots/{aid}")
+async def delete_screenshot(aid: str, body: ScreenshotAction, db: Db, user: User, key: Key):
+    return await screenshots.delete_screenshot(
+        db,
+        aid,
+        user.id,
+        key,
+        expected_revision=body.expected_revision,
+    )
 
 
 @router.post("/intake/screenshots/{aid}/{action}")

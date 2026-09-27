@@ -37,7 +37,7 @@ services:
   backend:
     build:
       context: ../../backend
-      dockerfile: ../deploy/production/backend.Dockerfile
+      target: production
       args:
         APP_REVISION: ${APP_REVISION:-unknown}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple/}
@@ -54,9 +54,9 @@ services:
       CASDOOR_ORGANIZATION: filmos
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      LLM_MODEL: ${LLM_MODEL:-qwen3.7-plus}
-      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-qwen3-vl-plus}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-deepseek-flash}
       LLM_VISION_THINKING: ${LLM_VISION_THINKING:-disabled}
       LLM_VISION_MAX_TOKENS: ${LLM_VISION_MAX_TOKENS:-8192}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
@@ -149,9 +149,9 @@ services:
   frontend:
     build:
       context: ../../frontend
-      dockerfile: ../deploy/production/frontend.Dockerfile
       args:
         APP_REVISION: ${APP_REVISION:-unknown}
+        NEXT_PUBLIC_AUTH_PROVIDER: casdoor
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
         NEXT_PUBLIC_CASDOOR_URL: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
         NEXT_PUBLIC_CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}

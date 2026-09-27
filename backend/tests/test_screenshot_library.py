@@ -213,3 +213,174 @@ async def test_archive_failure_rolls_back_visibility_and_active_draft(client, db
     assert item.status == "ACTIVE" and item.draft == before
     assert session.active_work_item_id == item.id
     assert len((await listing(client))["screenshots"]) == 1
+
+
+async def remove(client, image, revision=1, key=None):
+    return await client.request(
+        "DELETE",
+        f"/api/agent/v2/intake/screenshots/{image.id}",
+        json={"expected_revision": revision},
+        headers={"Idempotency-Key": key or str(uuid4())},
+    )
+
+
+async def created_item(client, db):
+    from tests.test_order_intake_v2 import seed_fields
+
+    sid, item, image = await prepared(client, db)
+    item.draft = await seed_fields(db)
+    await db.commit()
+    response = await client.post(
+        f"/api/agent/v2/items/{item.id}/confirm",
+        json={"expected_revision": item.revision},
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert response.status_code == 200, response.text
+    await db.refresh(item)
+    return sid, item, image
+
+
+async def test_delete_archive_preserves_formal_order_and_replays(client, db_session):
+    from app.models import AgentFileGcJob
+
+    sid, item, image = await created_item(client, db_session)
+    order_id, iid, aid = item.order_id, item.id, image.id
+    db_session.add(
+        OrderIntakeItem(
+            session_id=sid,
+            source_message_id=item.source_message_id,
+            source_attachment_id=aid,
+            queue_position=1,
+            source_order_index=2,
+            draft=item.draft,
+        )
+    )
+    await db_session.commit()
+    assert (await remove(client, image, revision=0)).json()["error"]["code"] == "SCREENSHOT_NOT_ARCHIVED"
+    assert (await command(client, image)).status_code == 200
+    assert (await remove(client, image, revision=0)).status_code == 409
+    key = str(uuid4())
+    result = await remove(client, image, key=key)
+    assert result.status_code == 200, result.text
+    assert (await remove(client, image, key=key)).json() == result.json()
+    assert await db_session.get(Order, order_id) is not None
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(OrderIntakeItem)
+            .where(OrderIntakeItem.source_attachment_id == aid)
+        )
+        == 0
+    )
+    assert (await client.get(f"/api/agent/v2/items/{iid}")).status_code == 404
+    assert (await client.get(f"/api/agent/v2/attachments/{aid}/content")).status_code == 404
+    assert (await listing(client, "?tab=archived"))["screenshots"] == []
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(AgentFileGcJob).where(AgentFileGcJob.attachment_id == aid)
+        )
+        == 1
+    )
+
+
+async def test_delete_formal_order_preserves_archive_and_cannot_recreate(client, db_session):
+    _, item, image = await created_item(client, db_session)
+    before = dict(item.draft)
+    assert (await command(client, image)).status_code == 200
+    response = await client.delete(f"/api/orders/{item.order_id}")
+    assert response.status_code in (200, 204), response.text
+    await db_session.refresh(item)
+    assert item.status == "CREATED" and item.order_id is None and item.draft == before
+    assert len((await listing(client, "?tab=archived"))["screenshots"]) == 1
+    assert (await client.get(f"/api/agent/v2/attachments/{image.id}/content")).status_code == 200
+    assert (await command(client, image, "restore", 1)).status_code == 200
+    response = await client.post(
+        f"/api/agent/v2/items/{item.id}/confirm",
+        json={"expected_revision": item.revision},
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert response.status_code == 409 and response.json()["error"]["code"] == "ORDER_DELETED"
+
+
+async def test_delete_archive_failure_is_atomic(client, db_session, monkeypatch):
+    import pytest
+
+    from app.models import AgentFileGcJob
+    from app.services import order_screenshot_service
+
+    _, item, image = await prepared(client, db_session)
+    assert (await command(client, image)).status_code == 200
+    iid, aid = item.id, image.id
+
+    def reject(*args, **kwargs):
+        raise RuntimeError("delete rollback")
+
+    monkeypatch.setattr(order_screenshot_service, "append_event", reject)
+    with pytest.raises(RuntimeError, match="delete rollback"):
+        await remove(client, image)
+    await db_session.rollback()
+    assert await db_session.get(OrderIntakeItem, iid) is not None
+    assert await db_session.get(ChatAttachment, aid) is not None
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(AgentFileGcJob).where(AgentFileGcJob.attachment_id == aid)
+        )
+        == 0
+    )
+    assert len((await listing(client, "?tab=archived"))["screenshots"]) == 1
+
+
+async def test_delete_rejects_busy_and_other_owner(client, db_session):
+    sid, iid = await setup_item(client, db_session)
+    item = await db_session.get(OrderIntakeItem, iid)
+    image = await db_session.get(ChatAttachment, item.source_attachment_id)
+    image.intake_archived_at = datetime.now(UTC)
+    await db_session.commit()
+    assert (await remove(client, image, revision=0)).status_code == 409
+    await fail_run(db_session, await claim(db_session, "delete-test"), "TEST", "test")
+    db_session.add(User(id="delete-other", email="delete-other@example.invalid", password_hash="test"))
+    await db_session.flush()
+    session = await db_session.get(ChatSession, sid)
+    session.user_id = "delete-other"
+    await db_session.commit()
+    assert (await remove(client, image, revision=0)).status_code == 404
+    await db_session.refresh(image)
+    assert image.intake_archived_at is not None
+
+
+async def test_delete_legacy_archive_preserves_sibling_and_blocks_retry(client, db_session):
+    from app.models import AgentRun
+
+    sid, item, image = await prepared(client, db_session)
+    second = await upload(client, sid)
+    other = await db_session.get(ChatAttachment, second["id"])
+    other.status, other.message_id, other.position = "BOUND", item.source_message_id, 1
+    db_session.add(
+        OrderIntakeItem(
+            session_id=sid,
+            source_message_id=item.source_message_id,
+            source_attachment_id=other.id,
+            queue_position=2,
+            draft=item.draft,
+        )
+    )
+    session = await db_session.get(ChatSession, sid)
+    session.status, session.archived_at = "ARCHIVED", datetime.now(UTC)
+    session.active_work_item_id = None
+    item.status = "DEFERRED"
+    run = await db_session.scalar(select(AgentRun).where(AgentRun.work_item_id == item.id))
+    await db_session.commit()
+    assert (await remove(client, image, revision=0)).status_code == 200
+    assert [g["id"] for g in (await listing(client, "?tab=archived"))["screenshots"]] == [other.id]
+    await db_session.refresh(run)
+    assert run.work_item_id is None and run.config_snapshot["source_deleted"] is True
+    session.status, session.archived_at = "ACTIVE", None
+    await db_session.commit()
+    import pytest
+    from fastapi import HTTPException
+
+    from app.services.agent_session_service import retry_run
+
+    with pytest.raises(HTTPException) as error:
+        await retry_run(db_session, run.id, "test-user", str(uuid4()), session.state_revision)
+    assert error.value.status_code == 409

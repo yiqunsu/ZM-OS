@@ -3,9 +3,8 @@ import { useConfirmation } from "@/components/ConfirmationProvider";
 import { useEffect, useState, useImperativeHandle, type Ref } from "react";
 import Link from "next/link";
 import { ImagePreview } from "./ImagePreview";
-import OrderForm, {
-  type OrderDraft as FormDraft,
-} from "@/components/orders/OrderForm";
+import OrderForm from "@/components/orders/form/OrderForm";
+import type { OrderDraft as FormDraft } from "@/components/orders/form/model";
 import { AgentError, agentApi, attachmentUrl } from "./api";
 import type { OrderDraft, WorkItem } from "./types";
 
@@ -161,12 +160,12 @@ export default function OrderDraftEditor({
           </span>
         </div>
       </div>
-      {item.status === "CREATED" && item.order_id && (
+      {item.status === "CREATED" && (
         <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
-          订单已创建。
-          <Link className="ml-2 underline" href={`/orders/${item.order_id}`}>
+          {item.order_id ? "订单已创建。" : "正式订单已删除，识别记录保留。"}
+          {item.order_id && <Link className="ml-2 underline" href={`/orders/${item.order_id}`}>
             查看正式订单
-          </Link>
+          </Link>}
         </p>
       )}
       {error && (

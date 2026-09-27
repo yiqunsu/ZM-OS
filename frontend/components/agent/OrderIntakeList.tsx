@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, ArchiveRestore, Check, ChevronDown, FileImage, LoaderCircle } from "lucide-react";
+import { Archive, ArchiveRestore, Trash2, Check, ChevronDown, FileImage, LoaderCircle } from "lucide-react";
 import type { ScreenshotTab } from "./useScreenshotList";
 import type { WorkItem } from "./types";
 import type { ScreenshotGroup } from "./screenshotGroups";
@@ -13,7 +13,7 @@ export function itemTitle(item: WorkItem) {
 }
 export default function OrderIntakeList({
   screenshots,
-  tab, onTab, onArchive,
+  tab, onTab, onArchive, onDelete,
   counts,
   selectedId,
   runningId,
@@ -27,6 +27,7 @@ export default function OrderIntakeList({
   tab: ScreenshotTab;
   onTab: (tab: ScreenshotTab) => void;
   onArchive: (group: ScreenshotGroup) => void;
+  onDelete: (group: ScreenshotGroup) => void;
   counts?: Record<string, number>;
   selectedId?: string;
   runningId?: string | null;
@@ -121,6 +122,11 @@ export default function OrderIntakeList({
                 {screenshot.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
                 {screenshot.archived ? "恢复截图" : "归档截图"}
               </button>
+              {screenshot.archived && <button disabled={disabled || screenshot.busy}
+                onClick={() => onDelete(screenshot)}
+                aria-label={`删除 ${screenshot.day} 第 ${position} 张截图`}>
+                <Trash2 size={13} />删除截图
+              </button>}
             </div>
             {!collapsed.has(id) &&
               group.map((i) =>

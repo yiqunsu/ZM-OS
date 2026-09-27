@@ -2,9 +2,7 @@
 
 import pytest
 
-from app.schemas.agent.order_intake import RawOrderExtraction
-from app.services.order_matching_service import extracted_draft
-from app.services.order_quantity_extraction import extracted_quantity
+from scripts.maintenance.extraction import RawOrderExtraction, extracted_quantity, normalize_legacy
 from tests.support.extraction_fixture import extracted_order, screenshot
 from tests.test_agent_v2 import enable_v2  # noqa: F401
 
@@ -50,7 +48,7 @@ def test_never_choose_from_ranges_conflicts_or_invalid_numbers(raw, unit):
 
 async def test_draft_preserves_delivery_constraints_and_existing_notes(db_session):
     raw = RawOrderExtraction(quantity_raw="7500米不要多-包含损耗", unit_raw="米", notes="加急")
-    draft = await extracted_draft(db_session, raw)
+    draft, _ = normalize_legacy(raw)
     assert draft["quantity"] == "7500" and draft["unit"] == "m"
     assert draft["extra_notes"] == "不要多-包含损耗；加急"
     assert raw.quantity_raw == "7500米不要多-包含损耗"
@@ -63,7 +61,7 @@ async def test_graph_and_scoped_repair_keep_each_quantity_and_user_edits(client,
     from app.agent.specialized.order_graph import build_order_graph
     from app.agent.worker import claim, finalize
     from app.models import ChatSession, OrderIntakeItem, SessionEvent
-    from scripts.repair_intake_quantities import repair
+    from scripts.maintenance.repair_intake_quantities import repair
     from tests.test_order_intake_v2 import FakeModel, factory, setup_item
 
     sid, iid = await setup_item(client, db_session)

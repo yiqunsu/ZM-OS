@@ -66,7 +66,7 @@ flowchart TD
 
 前端：`SchedulingWorkbench` 负责操作与说明，`useSchedulingWorkbench` 负责读取/互斥/保存，`SchedulingDraftBoard` 负责预览和调整；复用 `MachineColumn`、`TaskCard`、`OrderCard`，正式看板默认行为保持不变。旧聊天展示和独立草案编辑组件移除。
 
-后端：`agent_session_service` 接收结构化动作，`scheduling_graph` 编排，`agent_schedule_service` 管理草稿生命周期，`schedule_service` 校验和执行排产。
+后端：`agent_session_service` 接收结构化动作，`scheduling_graph` 编排，`agent_schedule_service` 管理草稿生命周期，`services/scheduling/service.py` 校验和执行排产。
 
 自动验证覆盖选单范围、幂等重试、范围外订单拒绝、未选订单变化、已选订单过期、替换范围保持、模型说明失败、未确认不下发、换机保存、拆单、弹窗取消/失败、刷新恢复与手机布局。全栈测试使用隔离数据库与固定模型验证业务链路；真实模型解释质量仍需用户本地试用评价。
 

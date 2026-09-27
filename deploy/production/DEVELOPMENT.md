@@ -1,4 +1,8 @@
-# development 分支部署与验收
+# development 分支部署与验收（历史记录）
+
+> 本文记录旧版混合聊天与回复卡片架构，不适用于当前 main，也不代表 development 分支当前实现。文中 `AgentReply.tsx`、`SchedulingAdapter`、旧 presentation Schema 和 Prompt 路径已退役，请勿按本文配置或验收当前版本。
+>
+> 当前本地启动见[根 README](../../README.md)，生产发布见[生产部署](README.md)，专用录单/排单架构见[架构说明](../../meta/agent-design/architecture.md)，验证要求见[测试规范](../../meta/TESTING.md)。以下内容仅保留历史背景。
 
 ## 运行配置
 

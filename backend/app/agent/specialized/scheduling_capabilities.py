@@ -15,9 +15,10 @@ from app.agent.worker import LeaseLost, lock_run
 from app.models import AgentRun, ChatMessage, ChatSession, SchedulePlan
 from app.schemas.agent import AgentInput
 from app.services import agent_schedule_service as plans
-from app.services import kanban_service, schedule_service
+from app.services import kanban_service
 from app.services.agent_event_service import append_event
 from app.services.agent_tool_service import perform_tool
+from app.services.scheduling import service as schedule_service
 from app.services.scheduling_lock import lock_scheduling_inputs
 
 TOOL_NAMES = frozenset({"read_board", "read_draft", "generate_draft"})

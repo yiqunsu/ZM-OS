@@ -264,7 +264,7 @@ Main Agent的规划文字只在本轮内使用，不写成聊天Message。进入
 生成建议只读取一致快照，不在模型计算期间持锁；生成保存的草案可以随后变旧，确认时必须再次验证。已有Service若尚未采用共享锁，属于本次实施依赖，不能只修Agent入口就宣称满足并发保证。此锁只串行化短暂业务写事务，不串行化不同Session的模型运行；工厂规模扩大后再评估更细粒度策略。
 
 
-## 11. 当前代码职责地图（2026-09-13）
+## 11. 当前代码职责地图（2026-09-27）
 
 | 路径 | 职责与边界 |
 | --- | --- |
@@ -274,9 +274,11 @@ Main Agent的规划文字只在本轮内使用，不写成聊天Message。进入
 | frontend/components/agent/useAgentOperation.ts | 当前 Shell 内跨操作的同步互斥与错误展示状态 |
 | frontend/components/agent/AgentConversation.tsx | 历史分页、消息与执行进度展示，接收权威快照 |
 | frontend/components/agent/AgentComposer.tsx | 输入区、图片选择及待发送预览 |
+| frontend/components/orders/form/ | 手工录单和 AI 草稿共用的表单入口、状态、字段与主数据弹窗 |
+| backend/app/services/scheduling/ | 输入查询与指纹、确定性规划、排产用例/事务分别维护 |
 | backend/app/schemas/agent/order_extraction.py | 仅校验模型 v2 的类型、枚举、数值边界及证据一致性 |
 | backend/app/services/order_extraction_normalizer.py | 已校验数值 → Decimal 换算 → 草稿字段及推测提示；不读取数据库或重新解析原文 |
-| backend/app/services/legacy_order_extraction.py | 历史 v1 证据的兼容转换；新模型响应不进入此路径 |
+| backend/scripts/maintenance/extraction.py | 历史 v1 证据的兼容转换；新模型响应不进入此路径 |
 | backend/app/services/order_matching_service.py | 有界查询已有客户/产品/配方，将唯一匹配补入规范化草稿 |
 | backend/app/services/order_draft_service.py | 草稿补丁合并和业务字段验证，不提交事务 |
 | backend/app/services/order_recognition_service.py | USER 来源保护、独立工作项、识别结果和事件在工具事务内一起保存 |

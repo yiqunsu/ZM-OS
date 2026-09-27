@@ -32,7 +32,7 @@ backend/app/
     agent_session_service.py          # 接受消息/命令、授权、SessionState
     agent_event_service.py            # seq与事务事件追加、安全投影
     order_intake_item_service.py      # 工作项、匹配、版本、确认
-    schedule_service.py               # 复用规则与正式排产事务
+    scheduling/                       # 输入/规划/正式排产事务
     chat_attachment_service.py        # 扩展暂存、多图与GC
   agent/
     registry.py                       # Agent类型与固定图/配置版本

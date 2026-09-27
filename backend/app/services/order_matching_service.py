@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Customer, Formula, Product, ProductCategory
 from app.schemas.agent.order_extraction import OrderExtraction
-from app.schemas.agent.order_intake import RawOrderExtraction
 from app.services import agent_session_service as sessions
 from app.services.order_extraction_normalizer import normalize_extraction
 
@@ -37,7 +36,7 @@ async def search_existing(db: AsyncSession, entity: str, query: str, limit: int 
     ]
 
 
-async def extracted_draft(db: AsyncSession, raw: RawOrderExtraction | OrderExtraction) -> dict:
+async def extracted_draft(db: AsyncSession, raw: OrderExtraction) -> dict:
     draft, _ = normalize_extraction(raw)
     for field, name, model, label in (
         ("customer_id", raw.customer_name, Customer, Customer.company),

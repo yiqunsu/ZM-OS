@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from app.schemas.order import OrderCreate
 from app.services.order_specification import validate_specification
 from app.services.production_rules import order_profile
-from app.services.schedule_service import _quantity_kg
+from app.services.scheduling.planner import quantity_kg
 
 
 @pytest.mark.parametrize("thickness", ["11.8丝", "11.8c", "118μm", "11.8C"])
@@ -48,7 +48,7 @@ def test_width_conversion_and_gram_load():
     )
     assert order_profile(order).width == 605
     assert order_profile(order).signature.thickness == "118μm"
-    assert _quantity_kg(order) == 1
+    assert quantity_kg(order) == 1
 
 
 @pytest.mark.parametrize("unit", ["m", "g", "kg"])
@@ -77,7 +77,7 @@ async def test_create_and_reload_fixed_specs(client, unit):
 
 
 async def test_meter_orders_schedule_with_original_quantity(db_session):
-    from app.services.schedule_service import create_schedule_plan
+    from app.services.scheduling.service import create_schedule_plan
     from tests.test_scheduling import _setup_schedulable
 
     session, _, orders = await _setup_schedulable(db_session)

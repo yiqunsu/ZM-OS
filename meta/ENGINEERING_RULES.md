@@ -118,6 +118,15 @@
 - 不保留失效的兼容代码、注释掉的大段实现或无用途依赖。
 - 发现代码与本目录文档冲突时，应在本次变更中修复，或明确记录为后续事项。
 
+### 目录与文件组织
+
+- 按业务功能归档相关实现；一个功能变复杂时，优先建立功能目录，不在 `services/` 或 `components/` 根层持续堆放同前缀文件。
+- 排产集中在 `backend/app/services/scheduling/`：`inputs.py` 负责查询与输入指纹，`planner.py` 负责已加载数据的计算，`service.py` 负责用例和事务。共享生产规则仍由 `production_rules.py` 管理。
+- 手工录单与 AI 草稿共用 `frontend/components/orders/form/`；入口、状态操作、字段展示、基础数据弹窗及样式放在一起。拆分以职责为依据，不为减少行数新增转发层。
+- 历史数据修复及旧格式解析放在 `backend/scripts/maintenance/`，应用运行代码不得反向依赖维护脚本。修复只由操作人员明确执行。
+- 每个应用保留一个 Dockerfile；本地/生产差异通过构建 target 和 Compose 参数表达，部署目录只保留配置与操作工具。
+- 临时分析脚本、构建日志和测试产物不放入源码目录；长期说明更新已有 README 或 `meta/` 对应文档。
+
 ## 11. Definition of Done
 
 一个变更完成至少意味着：
@@ -137,3 +146,5 @@ AI 截图提取的 thinking、输出上限与超时必须显式配置并可对�
 发布脚本必须保留配置校验、已有数据备份、迁移、服务健康与数据库结构检查，不强制生成报告或调用付费模型。
 变更依赖需同步 `backend/requirements.lock` 或前端 lockfile，并重新构建验证；模型功能的真实验收按改动范围单独进行。
 具体命令见 [生产部署](../deploy/production/README.md)。
+
+部署配置集中管理：Docker 本地环境只维护 `deploy/local/.env`，生产维护 `deploy/production/.env.production`；各自保留 `.example`。Compose 必须按服务显式分配变量，不把整份含数据库/模型密钥的 env 注入前端。

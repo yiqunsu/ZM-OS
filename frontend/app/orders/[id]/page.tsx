@@ -1,4 +1,4 @@
-import OrderForm from "@/components/orders/OrderForm";
+import OrderForm from "@/components/orders/form/OrderForm";
 
 export default async function EditOrderPage({
   params,
