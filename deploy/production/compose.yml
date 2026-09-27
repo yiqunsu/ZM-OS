@@ -40,6 +40,7 @@ services:
       dockerfile: ../deploy/production/backend.Dockerfile
       args:
         APP_REVISION: ${APP_REVISION:-unknown}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple/}
     image: filmos-backend:production
     restart: unless-stopped
     init: true

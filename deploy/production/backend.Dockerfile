@@ -10,8 +10,9 @@ RUN groupadd --system filmos \
     && useradd --system --gid filmos --home-dir /app filmos
 
 COPY requirements.txt requirements.lock ./
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    pip install --timeout 60 --retries 5 -r requirements.txt -c requirements.lock
+    pip install --index-url "${PIP_INDEX_URL}" --timeout 60 --retries 5 -r requirements.txt -c requirements.lock
 
 COPY --chown=filmos:filmos . .
 ARG APP_REVISION=unknown
