@@ -34,6 +34,18 @@ def base_environment(runtime_dir: Path) -> dict[str, str]:
 
 
 class PrepareCasdoorTests(unittest.TestCase):
+    def test_login_branding_uses_same_origin_in_both_deployment_modes(self) -> None:
+        for origin in ["https://auth.zmorder.cn", "http://auth.filmos.test:8080"]:
+            with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
+                runtime_dir = Path(temporary)
+                result = self.run_generator(runtime_dir, {"CASDOOR_ISSUER": origin})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                application = json.loads((runtime_dir / "init_data.json").read_text())["applications"][0]
+                self.assertEqual(application["logo"], f"{origin}/branding/filmos-logo.svg")
+                self.assertEqual(application["formCss"], application["formCssMobile"])
+                self.assertIn("@media", application["formCssMobile"])
+                self.assertNotIn("<style", application["formCss"])
+
     def run_generator(
         self,
         runtime_dir: Path,

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen3.7-plus"
     LLM_VISION_MODEL: str = "qwen3-vl-plus"
     LLM_REQUEST_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
+    LLM_VISION_THINKING: Literal["provider_default", "disabled", "enabled"] = "disabled"
+    LLM_VISION_MAX_TOKENS: int = Field(default=8192, ge=256, le=131072)
+    APP_REVISION: str = "unknown"
     # Maintenance switch; disabling does not restore the retired runtime.
     AGENT_V2_ENABLED: bool = True
     CHAT_ATTACHMENT_DIR: str = "var/chat-attachments"

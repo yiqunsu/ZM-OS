@@ -65,6 +65,9 @@ initDataFile = /init_data.json
 owner_name = required("CASDOOR_OWNER_NAME")
 owner_email = required("CASDOOR_OWNER_EMAIL").strip().lower()
 current_app_url = required("APP_PUBLIC_URL").rstrip("/")
+login_css = (Path(__file__).resolve().parents[1] / "branding/login.css").read_text(
+    encoding="utf-8"
+)
 wechat_login_enabled = enabled("WECHAT_LOGIN_ENABLED")
 wechat_provider_name = "provider-wechat-web"
 wechat_providers: list[dict[str, object]] = []
@@ -144,6 +147,10 @@ init_data = {
             "name": "app-filmos",
             "displayName": "FilmOS",
             "category": "Default",
+            "logo": f"{origin}/branding/filmos-logo.svg",
+            "formCss": login_css,
+            "formCssMobile": login_css,
+            "formOffset": 2,
             "type": "All",
             "scopes": [],
             "homepageUrl": current_app_url,

@@ -18,7 +18,8 @@
 
 先推送经过验证的 development 提交，再在服务器检出这个提交。不要覆盖服务器未提交配置。
 记录 `git rev-parse HEAD`，通过现有 `scripts/deploy.sh` 构建部署。
-现有脚本生成 `production` 标签，发布记录必须同时记录 Git SHA；分支名不是不可变镜像版本。
+部署脚本要求干净的已提交工作区，使用 Git SHA 镜像标签，并保存发布证据。
+参数对照与真实图片验收见 [运维流程](../OPERATIONS.md)。
 本地 development 修改不会自动同步到 GitHub 或服务器。
 
 ## 员工验收
