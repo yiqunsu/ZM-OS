@@ -2,7 +2,7 @@
 
 部署目录和环境选择见[部署总入口](../README.md)。
 
-> 正式发布先按 [版本发布规则](../../meta/RELEASING.md)检出目标版本标签，再运行 `./deploy/production/scripts/deploy.sh`。第 6 节的分支拉取方式仅用于旧流程。
+> 正式发布先按 [版本发布规则](../../meta/RELEASING.md)检出目标版本标签，再运行 `./deploy/production/scripts/deploy.sh`。具体命令见第 6 节。
 
 本目录用于把 FilmOS 部署到腾讯云轻量应用服务器。生产栈由 Caddy、Next.js、FastAPI、AI Worker、Casdoor 和 PostgreSQL 组成；后端与 Worker 共用镜像。本地与生产统一使用 `backend/Dockerfile` 和 `frontend/Dockerfile`；本 Compose 选择后端 `production` target，并显式传入前端 Casdoor 模式及 API 地址。Redis、Phoenix、Sentry、Loki、COS 不在第一版生产范围内。
 
@@ -191,18 +191,20 @@ WECHAT_OPEN_APP_SECRET=
 
 ## 6. 日常更新、健康和日志
 
-在服务器的 `/opt/filmos` 中执行。先确认处于 `main`，检查未提交改动；环境文件保留在服务器上，不要再次复制模板覆盖。
+在服务器的 `/opt/filmos` 中执行。先检查未提交改动，再检出要发布的版本标签；环境文件保留在服务器上，不要再次复制模板覆盖。
 
 ```bash
 cd /opt/filmos
 git status --short
-git pull --ff-only
+git fetch origin --tags
+git checkout --detach v1.0.0  # 替换为实际要部署的版本标签
+./deploy/production/scripts/validate-env.sh
 ./deploy/production/scripts/deploy.sh
 ```
 
 脚本只负责配置校验、顺序构建、登录服务准备、停止应用写入、已有数据备份、数据库迁移、启动和健康/数据库结构检查。不会自动调用付费模型，也不生成发布报告或要求本地/云端报告对照。成功后在网页上检查登录和一次 AI 操作；容器健康不等于模型功能已验证。
 
-前后端固定使用 `production` 镜像标签，后端和 Worker 共用一个镜像。每次都让 Docker 检查构建缓存，因此同一提交修改前端域名参数也会重新构建对应步骤。Git revision 仅作镜像内版本记录；未提交改动会显示警告并标记 `-dirty`，不会自动清理或阻止发布。推荐从已提交的 `main` 发布。
+前后端固定使用 `production` 镜像标签，后端和 Worker 共用一个镜像。每次都让 Docker 检查构建缓存，因此同一提交修改前端域名参数也会重新构建对应步骤。Git revision 仅作镜像内版本记录；未提交改动会显示警告并标记 `-dirty`，不会自动清理或阻止发布。正式发布使用 main 上的版本标签，并记录对应 Git revision。
 
 后端保留 `requirements.lock` 固定依赖版本，使用 BuildKit 下载缓存；变更代码或版本号不会使依赖安装层失效，安装失败后再次构建也可复用已缓存下载。首次仍需从软件源下载，缓存不能保证云端网络一定可用。不要用 `--no-cache` 或清理构建缓存来处理下载慢。
 
