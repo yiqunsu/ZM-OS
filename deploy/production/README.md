@@ -170,6 +170,8 @@ WECHAT_OPEN_APP_SECRET=
 
 已有 Casdoor 数据库不会由部署脚本直接改写内部表。先以 `built-in/admin` 登录 Casdoor 控制台并完成以下操作：
 
+若页面没有微信入口，先检查 `app-filmos` 的 Providers 和 Signin methods。`WECHAT_LOGIN_ENABLED=true` 只是初始化/部署验证开关，**对已有数据库仅改环境变量、重启容器不会新增入口**。AppID/AppSecret 仅在服务器私有环境文件和 Casdoor 后台填写，不发到聊天或提交到 Git。
+
 1. 在 Providers 新增 `OAuth / WeChat / Web`，名称为 `provider-wechat-web`，填写网站应用 AppID/AppSecret；
 2. 编辑 `app-filmos`，绑定该 Provider，开启 Can signin/Can unlink，关闭 Can signup，并清空 Binding rule；
 3. 在 Signin methods 保留 Password，并新增 `WeChat`、规则选择 `Tab`；
