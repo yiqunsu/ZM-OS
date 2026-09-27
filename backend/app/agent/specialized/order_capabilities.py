@@ -15,6 +15,7 @@ from app.agent.specialized.admission import Admission
 from app.agent.specialized.model_io import ModelIO
 from app.agent.worker import LeaseLost, RunContext, lock_run
 from app.core.database import async_session
+from app.core.logging import logger
 from app.models import ChatAttachment, ChatMessage, ChatSession, OrderIntakeItem
 from app.schemas.agent import AgentInput
 from app.schemas.agent.entity_matching import extraction_schema
@@ -27,6 +28,24 @@ from app.services.agent_event_service import append_event
 from app.services.agent_projections import item_snapshot
 from app.services.agent_tool_service import perform_tool
 from app.services.chat_attachment_service import _storage_path
+
+
+def schema_diagnostics(error: ValidationError) -> list[dict]:
+    """Emit schema-owned field names only; extra keys may contain private model text."""
+    schema = ScreenshotExtraction.model_json_schema()
+    fields = set(schema.get("properties", {}))
+    for definition in schema.get("$defs", {}).values():
+        fields.update(definition.get("properties", {}))
+    return [
+        {
+            "field": ".".join(
+                str(part) if isinstance(part, int) or part in fields else "<unknown>"
+                for part in detail["loc"][:10]
+            ),
+            "type": detail["type"],
+        }
+        for detail in error.errors(include_input=False, include_url=False, include_context=False)[:8]
+    ]
 
 
 class SearchArgs(AgentInput):
@@ -195,7 +214,12 @@ class OrderCapabilities(ModelIO):
                     raise RuntimeError("extraction unavailable") from None
                 messages[0]["content"] = system + "\n请修正上一轮输出，仅返回完整且符合Schema的JSON。"
             except (ValidationError, HTTPException) as error:
-                await self.recognition_diagnostic("SCHEMA_INVALID", attempt)
+                errors = (
+                    schema_diagnostics(error)
+                    if isinstance(error, ValidationError)
+                    else [{"type": "invalid_json_response"}]
+                )
+                await self.recognition_diagnostic("SCHEMA_INVALID", attempt, errors)
                 if attempt:
                     # Bad choices must not discard valid measurements. Strip only choice fields.
                     if isinstance(error, ValidationError) and all(
@@ -216,14 +240,6 @@ class OrderCapabilities(ModelIO):
                         break
                     await self._recognition_failed()
                     raise RuntimeError("extraction invalid") from None
-                errors = (
-                    [
-                        {"field": ".".join(map(str, e["loc"])), "type": e["type"]}
-                        for e in error.errors(include_input=False, include_url=False)[:8]
-                    ]
-                    if isinstance(error, ValidationError)
-                    else [{"type": "invalid_json_response"}]
-                )
                 messages[0]["content"] = (
                     system
                     + "\n上一次输出未符合Schema，请修正以下字段；数值不能带引号或单位："
@@ -273,18 +289,18 @@ class OrderCapabilities(ModelIO):
                 return await self._current_item()
             raise
 
-    async def recognition_diagnostic(self, code: str, attempt: int):
+    async def recognition_diagnostic(self, code: str, attempt: int, errors: list[dict] | None = None):
+        diagnostic = {"stage": "RECOGNITION_ERROR", "code": code, "attempt": attempt + 1}
+        if errors is not None:
+            diagnostic["errors"] = errors
+        logger.warning("recognition_error", run_id=self.context.run_id, **diagnostic)
         async with self.sessions() as db:
             session, run = await lock_run(db, self.context)
             append_event(
                 db,
                 session,
                 "run.progress",
-                {
-                    "stage": "RECOGNITION_ERROR",
-                    "code": code,
-                    "attempt": attempt + 1,
-                },
+                diagnostic,
                 run_id=run.id,
             )
             await db.commit()

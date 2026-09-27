@@ -232,3 +232,7 @@ deploy/production/tests/smoke-backup-restore.sh
 该文件同时覆盖无效模型参数拒绝。生产部署不再自动调用付费模型或比较运行报告。
 `deploy/production/tests/test_deploy.py` 使用隔离的假命令验证发布顺序、已有镜像仍重新检查构建、未提交改动标记和失败时停止，不连接业务数据库或真实模型。
 日常操作见 [生产部署](../deploy/production/README.md)；涉及模型行为的改动仍需单独验证实际图片功能，不能以容器健康替代。
+
+识别诊断回归：`test_extraction_schema.py` 验证逐次字段路径/类型、未知键和值脱敏；
+`test_order_workbench.py` 验证原始识别错误不被 Worker 通用失败覆盖，重试失败独立更新。
+这些测试使用合成响应，不代表已复现线上截图的具体字段错误。

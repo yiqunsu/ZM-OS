@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.agent.specialized.order_capabilities import OrderCapabilities
 from app.agent.specialized.order_graph import build_order_graph
 from app.agent.worker import claim, fail_run, finalize
-from app.models import AgentRun, OrderIntakeItem
+from app.models import AgentRun, OrderIntakeItem, SessionEvent
 from tests.support.extraction_fixture import extracted_order, screenshot
 from tests.test_agent_v2 import body, create, enable_v2, upload  # noqa: F401
 from tests.test_order_intake_v2 import factory, seed_fields
@@ -210,3 +210,34 @@ async def test_new_images_recognize_without_replacing_current_review(client, db_
         assert state["session"]["active_work_item_id"] == first_id
     assert [i["recognition_status"] for i in state["work_items"]] == ["SUCCEEDED", "SUCCEEDED"]
     assert [i["draft"]["quantity"] for i in state["work_items"]] == ["100", "200"]
+
+
+async def test_specific_recognition_failure_survives_worker_failure_and_retry(client, db_session):
+    await seed_fields(db_session)
+    sid = (await create(client, "ORDER_INTAKE"))["id"]
+    image = await upload(client, sid)
+    response = await client.post(
+        f"/api/agent/v2/sessions/{sid}/recognize",
+        json=body(content="", attachment_ids=[image["id"]]),
+    )
+    assert response.status_code == 202
+    context = await claim(db_session, "diagnostic-worker")
+    capabilities = OrderCapabilities(context, sessions=factory(db_session), model=NoChatModel())
+    await capabilities._recognition_failed("EXTRACTION_INVALID")
+    await fail_run(db_session, context, "EXECUTION_FAILED", "图片识别失败")
+    item = await db_session.get(OrderIntakeItem, context.work_item_id)
+    assert item.last_error_code == "EXTRACTION_INVALID"
+    failures = (await db_session.scalars(select(SessionEvent).where(
+        SessionEvent.run_id == context.run_id, SessionEvent.kind == "recognition.failed"
+    ))).all()
+    assert len(failures) == 1
+    retry = await client.post(
+        f"/api/agent/v2/items/{item.id}/recognize",
+        json={"expected_revision": item.revision},
+        headers={"Idempotency-Key": "diagnostic-retry"},
+    )
+    assert retry.status_code == 202, retry.text
+    following = await claim(db_session, "diagnostic-worker")
+    await fail_run(db_session, following, "WORKER_STOPPED", "处理已停止")
+    await db_session.refresh(item)
+    assert item.last_error_code == "WORKER_STOPPED"

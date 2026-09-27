@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentCommand, AgentRun, ChatAttachment, ChatSession, OrderIntakeItem
+from app.models import AgentCommand, AgentRun, ChatAttachment, ChatSession, OrderIntakeItem, SessionEvent
 from app.models.base import generate_id
 from app.services.agent_event_service import append_event, canonical_hash
 
@@ -45,7 +45,15 @@ async def continue_recognition(db: AsyncSession, session: ChatSession, run: Agen
         return
     if run.status == "FAILED" and run.work_item_id:
         item = await db.get(OrderIntakeItem, run.work_item_id)
-        if item.recognition_status != "SUCCEEDED":
+        # Only this Run's failure is authoritative; a retry may have an older failure.
+        recorded_failure = await db.scalar(
+            select(SessionEvent.id).where(
+                SessionEvent.run_id == run.id,
+                SessionEvent.work_item_id == item.id,
+                SessionEvent.kind == "recognition.failed",
+            ).limit(1)
+        )
+        if item.recognition_status != "SUCCEEDED" and recorded_failure is None:
             item.recognition_status, item.last_error_code = "FAILED", run.error_code
             item.revision += 1
             append_event(

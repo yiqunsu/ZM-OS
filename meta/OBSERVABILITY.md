@@ -139,3 +139,9 @@ worker 启动时独立初始化结构化日志与可选 Phoenix。新版 Trace �
 
 `/health` 的 revision 来自构建镜像；部署完成时输出相同的版本标记。发布不生成自动对照报告，不调用真实模型。
 排查时按需查看容器健康和经过脱敏的运行日志，不输出环境全量、凭证或业务数据。操作见 [生产部署](../deploy/production/README.md)。
+
+截图识别的结构校验失败通过 Worker 的 `recognition_error` 日志和
+`RECOGNITION_ERROR` 事件记录 `run_id`、尝试次数、最多八个字段路径与校验类型。
+未知字段名脱敏为 `<unknown>`，不记录字段值、模型正文、校验上下文或图片。
+同一 Run 已写入的 `recognition.failed` 保留原始错误码，不由通用终止错误覆盖；
+重试 Run 独立记录自己的失败。历史事件不能还原当时未记录的字段诊断。

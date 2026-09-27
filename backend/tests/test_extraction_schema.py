@@ -3,11 +3,12 @@
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 
-from app.agent.specialized.order_capabilities import OrderCapabilities
+from app.agent.specialized.order_capabilities import OrderCapabilities, schema_diagnostics
 from app.agent.specialized.order_graph import build_order_graph
 from app.agent.worker import claim, finalize
-from app.models import OrderIntakeItem
+from app.models import OrderIntakeItem, SessionEvent
 from app.schemas.agent.order_extraction import OrderExtraction, ScreenshotExtraction
 from app.services.order_matching_service import extracted_draft
 from tests.support.extraction_fixture import extracted_order, screenshot
@@ -114,3 +115,23 @@ async def test_graph_retries_specific_field_errors_before_saving(client, db_sess
         assert item.recognition_status == "FAILED" and item.extraction is None
         assert item.draft.get("quantity") is None
     assert item.order_id is None
+    events = (await db_session.scalars(select(SessionEvent).where(
+        SessionEvent.run_id == context.run_id, SessionEvent.kind == "run.progress"
+    ))).all()
+    diagnostics = [e.payload for e in events if e.payload.get("stage") == "RECOGNITION_ERROR"]
+    assert len(diagnostics) == (1 if fixed else 2)
+    for event in diagnostics:
+        assert {"field": "orders.0.quantity.value", "type": "float_type"} in event["errors"]
+    assert "SECRET_INVALID_VALUE" not in str(diagnostics)
+
+
+def test_schema_diagnostics_excludes_unknown_keys_and_values():
+    response = screenshot(extracted_order())
+    response["PRIVATE_CUSTOMER_TEXT"] = "SECRET_VALUE"
+    response["orders"][0]["quantity"]["value"] = "SECRET_NUMBER"
+    with pytest.raises(ValidationError) as failure:
+        ScreenshotExtraction.model_validate(response)
+    diagnostics = schema_diagnostics(failure.value)
+    assert {"field": "<unknown>", "type": "extra_forbidden"} in diagnostics
+    assert {"field": "orders.0.quantity.value", "type": "float_type"} in diagnostics
+    assert "SECRET" not in str(diagnostics) and "PRIVATE" not in str(diagnostics)
