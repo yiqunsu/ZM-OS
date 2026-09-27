@@ -176,9 +176,12 @@ export default function OrderWorkbench({
     <main
       className="order-workbench"
       onPaste={(e) => {
+        // Portal events can reach this React ancestor again through the DOM root.
+        if (e.defaultPrevented) return;
         const images = [...e.clipboardData.files];
         if (images.length && !busy) {
           e.preventDefault();
+          e.stopPropagation();
           addFiles(images);
           setUploadOpen(true);
         }

@@ -271,3 +271,5 @@ API、Worker 和前端健康。历史卷不得为通过测试而删除。
 ## 版本发布验证
 
 版本脚本执行 `python3 -m unittest discover -s scripts/release -p "test_*.py"` 和 `python3 scripts/release/version.py check`。发布 PR 必须通过全部必需 CI，标签、版本与来源由 release-policy 校验。完整规则见 [RELEASING.md](RELEASING.md)。
+
+剪贴板回归：工作台与上传弹窗（Portal）内单次 paste 均只添加一张；用户主动再次粘贴同一图片仍允许添加。协议测试同时验证两次粘贴仅产生两个附件上传和两个识别来源，防止弹窗事件传播造成重复上传。

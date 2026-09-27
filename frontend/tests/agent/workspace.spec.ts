@@ -1466,3 +1466,34 @@ test("归档截图删除确认、拒绝和断网重试，独立于正式订单",
   expect(keys[1]).toBe(keys[2]);
   expect(orderDeletes).toEqual([]);
 });
+
+test("单次粘贴截图在工作台和上传弹窗内都只添加一次", async ({ page }) => {
+  await page.route("**/sessions/session-1/snapshot", r => r.fulfill({json:initial()}));
+  let uploads = 0;
+  let recognized = false;
+  await page.route("**/sessions/session-1/attachments", r => {
+    uploads++;
+    return r.fulfill({json:{id:`pasted-${uploads}`}});
+  });
+  await page.route("**/sessions/session-1/recognize", r => {
+    expect(r.request().postDataJSON().attachment_ids).toEqual(["pasted-1", "pasted-2"]);
+    recognized = true;
+    return r.fulfill({status:202,json:{run_id:"paste-run"}});
+  });
+  await page.goto("/?session=session-1");
+  async function paste(selector: string) {
+    await page.locator(selector).evaluate(target => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array([137, 80, 78, 71])], "clipboard.png", {type:"image/png"}));
+      target.dispatchEvent(new ClipboardEvent("paste", {clipboardData:data, bubbles:true, cancelable:true}));
+    });
+  }
+  await paste(".order-workbench");
+  await expect(page.getByRole("button", {name:/移除截图/})).toHaveCount(1);
+  await paste('[data-slot="dialog-content"]');
+  await expect(page.getByRole("button", {name:/移除截图/})).toHaveCount(2);
+  await page.getByRole("button", {name:/识别订单/}).click();
+  await expect.poll(() => recognized).toBe(true);
+  expect(uploads).toBe(2);
+  await expect(page.getByRole("dialog", {name:"添加订单截图"})).toHaveCount(0);
+});
