@@ -38,7 +38,9 @@ services:
     build:
       context: ../../backend
       dockerfile: ../deploy/production/backend.Dockerfile
-    image: filmos-backend:production
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
+    image: filmos-backend:${FILMOS_IMAGE_TAG:-production}
     restart: unless-stopped
     init: true
     environment: &backend-environment
@@ -54,6 +56,9 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen3.7-plus}
       LLM_VISION_MODEL: ${LLM_VISION_MODEL:-qwen3-vl-plus}
+      LLM_VISION_THINKING: ${LLM_VISION_THINKING:-disabled}
+      LLM_VISION_MAX_TOKENS: ${LLM_VISION_MAX_TOKENS:-8192}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
       CHAT_ATTACHMENT_DIR: /app/data/chat-attachments
       AGENT_V2_ENABLED: ${AGENT_V2_ENABLED:-true}
       PHOENIX_ENABLED: "false"
@@ -87,7 +92,7 @@ services:
     logging: *default-logging
 
   agent-worker:
-    image: filmos-backend:production
+    image: filmos-backend:${FILMOS_IMAGE_TAG:-production}
     command: [python, -m, app.agent.worker]
     restart: unless-stopped
     init: true
@@ -145,10 +150,11 @@ services:
       context: ../../frontend
       dockerfile: ../deploy/production/frontend.Dockerfile
       args:
+        APP_REVISION: ${APP_REVISION:-unknown}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
         NEXT_PUBLIC_CASDOOR_URL: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.production}
         NEXT_PUBLIC_CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.production}
-    image: filmos-frontend:production
+    image: filmos-frontend:${FILMOS_IMAGE_TAG:-production}
     restart: unless-stopped
     init: true
     environment:
@@ -204,6 +210,7 @@ services:
       - "${WEB_BIND_IP:-127.0.0.1}:443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./branding:/srv/branding:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

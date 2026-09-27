@@ -130,7 +130,20 @@ ssh -L 8080:127.0.0.1:80 ubuntu@42.192.114.38
 
 `filmos-owner` 可修改基础数据；`filmos-operator` 可读取基础数据并管理订单、生产任务及自己的 Agent 会话。账号和角色不在 FilmOS 页面内维护。
 
-### 5.1 电脑微信扫码登录（可选）
+### 5.1 登录页外观
+
+登录页面由 Casdoor 的 `app-filmos` 提供。`branding/login.css` 定义浅灰背景、白色登录卡片和手机布局；`branding/filmos-logo.svg` 由认证域名下的 Caddy 同源提供，避免空 Logo 或外部图床失效导致破图。认证、密码恢复和微信入口继续使用 Casdoor 原生表单。
+
+新数据库初始化自动使用这些外观配置。**已有数据库不会覆盖应用配置**，更新仓库并部署 Caddy 后，在 Casdoor 管理后台编辑 `app-filmos`：
+
+1. Logo 填写 `https://auth.zmorder.cn/branding/filmos-logo.svg`（私有模式使用对应认证域名）；
+2. Form CSS 和 Form CSS Mobile 均粘贴 `deploy/production/branding/login.css` 全文，不包裹 `<style>`；
+3. Form position 选择 Center，保存后从 FilmOS 重新发起登录；
+4. 验证 Logo URL 返回 SVG；在桌面和手机检查输入框、错误提示、密码恢复、语言切换及启用后的微信标签。
+
+更新前先保存原有 Logo/CSS/位置字段，回滚时恢复这些字段。不要删除 `.initialized`、清空 Casdoor 数据库或用整个初始化 JSON 覆盖现有用户来应用外观。
+
+### 5.2 电脑微信扫码登录（可选）
 
 微信扫码只支持微信开放平台的“网站应用”，授权回调域填写 `auth.zmorder.cn`。备案、DNS、HTTPS 和微信应用审核全部生效前保持：
 

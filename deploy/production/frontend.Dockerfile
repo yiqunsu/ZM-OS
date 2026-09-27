@@ -22,6 +22,9 @@ COPY . .
 RUN npm run build
 
 FROM base AS runner
+ARG APP_REVISION=unknown
+ENV APP_REVISION=${APP_REVISION}
+LABEL org.opencontainers.image.revision=${APP_REVISION}
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \

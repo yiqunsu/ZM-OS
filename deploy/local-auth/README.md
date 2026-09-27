@@ -13,6 +13,10 @@ This overlay exists only for exercising the production-style OIDC and RBAC flow.
 The overlay creates a separate PostgreSQL role and database. Casdoor joins only
 the `local_auth_application` and `local_auth_database` networks. PostgreSQL is never reachable from browser code.
 
+The application network is not Docker-internal so the loopback-only `8001`
+publication works; the database network remains internal. Login branding files
+are mounted both for configuration generation and under Casdoor's web assets.
+
 The merged frontend build keeps the default browser API base at
 `http://localhost:8000/api`. To use another public API base, set
 `NEXT_PUBLIC_API_URL` before running `up.sh`; the frontend image must be rebuilt

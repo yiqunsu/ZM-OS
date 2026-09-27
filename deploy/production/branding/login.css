@@ -1,0 +1,68 @@
+/* Casdoor 3.125.0: keep its native password, OAuth and recovery forms. */
+body:has(.login-content) {
+  background: #f5f6f8;
+  color: #27272a;
+}
+.login-content {
+  width: 100%;
+  padding: 64px 20px 40px;
+  margin: 0 auto !important;
+  box-sizing: border-box;
+}
+.login-content .login-panel,
+.login-content .login-panel-dark {
+  width: 420px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 36px 40px 32px;
+  box-sizing: border-box;
+  background: #fff;
+  color: #27272a;
+  border: 1px solid #e4e4e7;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgb(24 24 27 / 5%);
+}
+.login-content .login-form,
+.login-content #normal_login {
+  width: 100% !important;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+.login-content .login-logo-box { margin: 0 0 28px; text-align: left; }
+.login-content .login-logo-box img { width: 168px; height: 40px; object-fit: contain; }
+.login-content .login-logo-box::after {
+  content: "登录订单与生产工作台";
+  display: block;
+  margin-top: 16px;
+  font-size: 14px;
+  line-height: 22px;
+  color: #71717a;
+}
+.login-content .login-languages { top: 0; right: 0; }
+.login-content .ant-input-affix-wrapper {
+  min-height: 44px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.login-content .ant-input { font-size: 14px; }
+.login-content .ant-form-item { margin-bottom: 20px; }
+.login-content .login-forget-password {
+  width: 100%;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+.login-content .login-button {
+  height: 44px;
+  border-radius: 8px;
+  font-size: 15px;
+}
+.login-content .login-button-box { margin-bottom: 0; }
+@media (max-width: 480px) {
+  .login-content { padding: 32px 16px; }
+  .login-content .login-panel,
+  .login-content .login-panel-dark { padding: 28px 24px; }
+}

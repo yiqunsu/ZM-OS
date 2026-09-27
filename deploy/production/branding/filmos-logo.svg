@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="168" height="40" viewBox="0 0 168 40" role="img" aria-label="FilmOS">
+  <rect width="40" height="40" rx="10" fill="#18181b"/>
+  <path d="M12 11h18v5H17v5h11v5H17v8h-5z" fill="#fff"/>
+  <text x="52" y="29" font-family="Arial,sans-serif" font-size="27" font-weight="700" fill="#18181b">FilmOS</text>
+</svg>

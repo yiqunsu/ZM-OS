@@ -8,14 +8,25 @@ source "${SCRIPT_DIR}/common.sh"
 
 require_command docker
 require_command git
+require_command python3
 load_environment
 
 "${SCRIPT_DIR}/validate-env.sh"
 
+# A release tag must identify committed source, never an untracked local patch.
+[[ -z "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=normal)" ]] \
+  || die "Commit or preserve working-tree changes before release; do not discard them."
+export APP_REVISION="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+export FILMOS_IMAGE_TAG="${APP_REVISION}"
+
 printf 'Building backend image...\n'
-compose build backend
+if ! docker image inspect "filmos-backend:${FILMOS_IMAGE_TAG}" >/dev/null 2>&1; then
+  compose build backend
+fi
 printf 'Building frontend image...\n'
-compose build frontend
+if ! docker image inspect "filmos-frontend:${FILMOS_IMAGE_TAG}" >/dev/null 2>&1; then
+  compose build frontend
+fi
 
 printf 'Starting PostgreSQL...\n'
 compose up -d postgres
@@ -74,7 +85,23 @@ else
 fi
 
 compose ps
-compose run --rm backend alembic current
+compose exec -T backend alembic check
+mkdir -p "${REPO_ROOT}/.data/releases"
+release_dir="${REPO_ROOT}/.data/releases/$(date -u +%Y%m%dT%H%M%SZ)-${APP_REVISION}"
+mkdir -p "${release_dir}"
+compose exec -T backend python scripts/deployment_report.py > "${release_dir}/backend.json"
+if [[ "${AGENT_V2_ENABLED:-true}" == "true" ]]; then
+  compose exec -T agent-worker python scripts/deployment_report.py > "${release_dir}/worker.json"
+fi
+compose images --format json > "${release_dir}/images.json"
+python3 "${REPO_ROOT}/deploy/check.py" --mode production --output "${release_dir}/report.json"
+if [[ "${AGENT_V2_ENABLED:-true}" == "true" ]]; then
+  printf 'Verifying real model with synthetic image (one paid API call)...\n'
+  compose exec -T agent-worker python scripts/verify_vision.py > "${release_dir}/vision.json" \
+    || die "Image acceptance failed. See ${release_dir}/vision.json; services remain running for diagnosis."
+fi
+printf 'Release evidence: %s\n' "${release_dir}"
+printf 'Service checks completed; browser login and upload acceptance are still required.\n'
 
 deployed_commit="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || printf unknown)"
 printf 'FilmOS deployment is healthy at commit %s.\n' "${deployed_commit}"

@@ -48,9 +48,10 @@ services:
       CASDOOR_OWNER_PASSWORD: ${CASDOOR_OWNER_PASSWORD:?Set CASDOOR_OWNER_PASSWORD in .env.local-auth}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:?Set APP_PUBLIC_URL in .env.local-auth}
     volumes:
-      - ./deploy/production/scripts/prepare-casdoor.py:/prepare-casdoor.py:ro
+      - ./deploy/production/scripts/prepare-casdoor.py:/deploy/production/scripts/prepare-casdoor.py:ro
+      - ./deploy/production/branding:/deploy/production/branding:ro
       - ./.data/local-casdoor:/runtime
-    command: ["python", "/prepare-casdoor.py"]
+    command: ["python", "/deploy/production/scripts/prepare-casdoor.py"]
 
   casdoor:
     image: casbin/casdoor:3.125.0@sha256:d7658640aba370495e59dc1464756d2ae7ec66576203b9de0040e9cc37793607
@@ -61,6 +62,7 @@ services:
     volumes:
       - ./.data/local-casdoor/app.conf:/conf/app.conf:ro
       - ./.data/local-casdoor/init_data.json:/init_data.json:ro
+      - ./deploy/production/branding:/web/build/branding:ro
     ports:
       - "127.0.0.1:8001:8000"
     depends_on:
@@ -101,6 +103,17 @@ services:
       - default
       - local_auth_application
 
+  agent-worker:
+    environment:
+      AUTH_PROVIDER: casdoor
+      CASDOOR_ISSUER: ${CASDOOR_ISSUER:?Set CASDOOR_ISSUER in .env.local-auth}
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:?Set CASDOOR_CLIENT_ID in .env.local-auth}
+      CASDOOR_JWKS_URL: http://casdoor:8000/.well-known/jwks
+      CASDOOR_ORGANIZATION: filmos
+    networks:
+      - default
+      - local_auth_application
+
   frontend:
     build:
       args:
@@ -132,6 +145,6 @@ services:
 
 networks:
   local_auth_application:
-    internal: true
+    internal: false
   local_auth_database:
     internal: true

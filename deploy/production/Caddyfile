@@ -59,5 +59,11 @@
 	}
 
 	encode zstd gzip
-	reverse_proxy casdoor:8000
+	handle /branding/* {
+		root * /srv
+		file_server
+	}
+	handle {
+		reverse_proxy casdoor:8000
+	}
 }

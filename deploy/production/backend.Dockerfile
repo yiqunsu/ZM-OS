@@ -5,13 +5,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+ARG APP_REVISION=unknown
+ENV APP_REVISION=${APP_REVISION}
+LABEL org.opencontainers.image.revision=${APP_REVISION}
+
 WORKDIR /app
 
 RUN groupadd --system filmos \
     && useradd --system --gid filmos --home-dir /app filmos
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock
 
 COPY --chown=filmos:filmos . .
 RUN mkdir -p /app/data/chat-attachments \

@@ -5,20 +5,24 @@ from app.agent import model_transport
 
 
 @pytest.mark.parametrize(
-    "host,model,thinking",
+    "host,model,mode,thinking",
     [
-        ("https://api.deepseek.com", "deepseek-v4-flash-vision-exp", {"type": "disabled"}),
-        ("https://api.deepseek.com", "deepseek-v4-flash", None),
-        ("https://other.example/v1", "deepseek-v4-flash-vision-exp", None),
+        ("https://api.deepseek.com", "deepseek-v4-flash-vision-exp", "disabled", {"type": "disabled"}),
+        ("https://api.deepseek.com", "deepseek-flash", "disabled", {"type": "disabled"}),
+        ("https://api.deepseek.com", "deepseek-flash", "enabled", {"type": "enabled"}),
+        ("https://api.deepseek.com", "deepseek-flash", "provider_default", None),
+        ("https://other.example/v1", "deepseek-v4-flash-vision-exp", "disabled", None),
     ],
 )
 async def test_vision_request_options_are_scoped_and_truncated_results_rejected(
-    monkeypatch, host, model, thinking
+    monkeypatch, host, model, mode, thinking
 ):
     import httpx
 
     from app.core.config import settings
 
+    monkeypatch.setattr(settings, "LLM_VISION_THINKING", mode)
+    monkeypatch.setattr(settings, "LLM_VISION_MAX_TOKENS", 12345)
     monkeypatch.setattr(settings, "LLM_BASE_URL", host)
     monkeypatch.setattr(settings, "LLM_API_KEY", "test-only-key")
     original = httpx.AsyncClient
@@ -28,7 +32,7 @@ async def test_vision_request_options_are_scoped_and_truncated_results_rejected(
 
         payload = json.loads(request.content)
         assert payload.get("thinking") == thinking
-        assert payload["max_tokens"] == 8192
+        assert payload["max_tokens"] == 12345
         # A syntactically complete JSON can still be a truncated subset of orders.
         return httpx.Response(
             200, json={"choices": [{"finish_reason": "length", "message": {"content": '{"orders": [{}]}'}}]}

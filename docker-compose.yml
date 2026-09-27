@@ -28,7 +28,10 @@ services:
       - phoenixdata:/mnt/data
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
     ports:
       - "8000:8000"
     env_file:
@@ -50,7 +53,10 @@ services:
       - default
 
   agent-worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
     command: [python, -m, app.agent.worker]
     init: true
     restart: unless-stopped
@@ -76,6 +82,7 @@ services:
     build:
       context: ./frontend
       args:
+        APP_REVISION: ${APP_REVISION:-unknown}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
     ports:
       - "3000:3000"

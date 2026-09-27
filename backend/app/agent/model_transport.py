@@ -50,18 +50,15 @@ async def call_vision_model(
         "model": model,
         "messages": messages,
         "temperature": 0,
-        "max_tokens": 8192,
+        "max_tokens": settings.LLM_VISION_MAX_TOKENS,
         "response_format": {"type": "json_object"},
     }
-    # DeepSeek vision defaults to thinking; bounded extraction needs the JSON answer
-    # rather than exhausting the output budget on reasoning. Do not send provider
-    # extensions to other OpenAI-compatible services.
+    # Provider extension is explicit and independent of model aliases.
     if (
         urlsplit(settings.LLM_BASE_URL).hostname == "api.deepseek.com"
-        and model.startswith("deepseek-v4-")
-        and "vision" in model
+        and settings.LLM_VISION_THINKING != "provider_default"
     ):
-        payload["thinking"] = {"type": "disabled"}
+        payload["thinking"] = {"type": settings.LLM_VISION_THINKING}
     timeout = httpx.Timeout(settings.LLM_REQUEST_TIMEOUT_SECONDS, connect=10.0)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

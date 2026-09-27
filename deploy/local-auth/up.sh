@@ -16,6 +16,11 @@ if grep -q 'replace-with\|owner@example.test' "${ENV_FILE}"; then
   exit 1
 fi
 
+export APP_REVISION="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=normal)" ]]; then
+  APP_REVISION="${APP_REVISION}-dirty"
+fi
+
 compose=(
   docker compose
   --env-file "${ENV_FILE}"
@@ -38,6 +43,6 @@ if [[ ! -f "${marker}" ]]; then
   printf 'Casdoor bootstrap data is now locked to create-only mode.\n'
 fi
 
-"${compose[@]}" up -d --build backend frontend
+"${compose[@]}" up -d --build backend frontend agent-worker
 "${compose[@]}" ps
 printf 'Local Casdoor login is available at %s.\n' "$(grep '^CASDOOR_ISSUER=' "${ENV_FILE}" | cut -d= -f2-)"
